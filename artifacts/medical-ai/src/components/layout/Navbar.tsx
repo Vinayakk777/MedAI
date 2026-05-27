@@ -12,6 +12,7 @@ export function Navbar() {
 
   const navLinks = [
     { name: "Home", path: "/" },
+    { name: "Dashboard", path: "/dashboard" },
     { name: "Chat", path: "/chat" },
     { name: "About", path: "/about" },
   ];

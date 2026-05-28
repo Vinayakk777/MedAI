@@ -55,7 +55,7 @@ function MetricCard({ icon: Icon, label, value, suffix, prefix, change, changeLa
     <motion.div
       initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: index * 0.08, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.5, delay: index * 0.08, ease: [0.22, 1, 0.36, 1] as const }}
       whileHover={{ y: -3, transition: { duration: 0.2 } }}
       data-testid={`overview-card-${index}`}
       className="relative group rounded-2xl border bg-card/70 backdrop-blur-sm p-6 overflow-hidden cursor-default"

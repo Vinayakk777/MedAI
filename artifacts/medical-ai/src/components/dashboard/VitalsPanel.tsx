@@ -119,7 +119,7 @@ export function VitalsPanel() {
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${v.percent}%` }}
-                    transition={{ duration: 0.8, delay: 0.3 + i * 0.07, ease: [0.22, 1, 0.36, 1] }}
+                    transition={{ duration: 0.8, delay: 0.3 + i * 0.07, ease: [0.22, 1, 0.36, 1] as const }}
                     className="h-full rounded-full"
                     style={{ background: `linear-gradient(90deg, ${v.color}80, ${v.color})` }}
                   />

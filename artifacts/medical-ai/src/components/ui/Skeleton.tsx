@@ -1,17 +1,13 @@
 import { cn } from "@/lib/utils";
 
-interface SkeletonProps {
-  className?: string;
-}
+type SkeletonProps = React.HTMLAttributes<HTMLDivElement>;
 
-export function Skeleton({ className }: SkeletonProps) {
+export function Skeleton({ className, ...props }: SkeletonProps) {
   return (
     <div
-      className={cn(
-        "rounded-md shimmer",
-        className
-      )}
+      className={cn("rounded-md shimmer", className)}
       aria-hidden="true"
+      {...props}
     />
   );
 }

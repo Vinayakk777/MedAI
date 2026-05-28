@@ -1,0 +1,154 @@
+You are a senior full-stack engineer working at a FAANG-level startup.
+
+Build a complete production-grade authentication and AI chat persistence system for an AI Medical Chatbot SaaS.
+
+Tech Stack:
+Frontend:
+- React + Vite
+- Tailwind CSS
+- Framer Motion
+- shadcn/ui
+- Clerk Authentication
+
+Backend:
+- Node.js
+- Express
+- MongoDB + Mongoose
+
+Authentication:
+- Clerk
+- Google OAuth
+- Email/password authentication
+
+Goal:
+Create a premium ChatGPT-style healthcare AI platform where users can securely login and always see their previous chat history after signing in.
+
+Core Features:
+1. Clerk authentication setup
+2. Google Sign-In
+3. Email/password authentication
+4. Protected routes
+5. Session persistence
+6. Persistent AI chat history
+7. Save chats to MongoDB
+8. Fetch previous chats automatically after login
+9. Recent chats sidebar like ChatGPT
+10. Auto-create conversations
+11. Auto-save chat messages
+12. Chat deletion
+13. Rename conversations
+14. Conversation timestamps
+15. User-specific chat history
+16. Real-time UI updates
+17. Chat restoration after refresh/re-login
+
+Frontend Requirements:
+- Premium futuristic healthcare SaaS UI
+- ChatGPT-inspired sidebar
+- Recent chats list
+- Search conversations
+- Sticky chat input
+- AI typing animation
+- Markdown rendering
+- Smooth animations
+- Dark mode support
+- Glassmorphism effects
+- Responsive mobile layout
+- Loading skeletons
+- Empty states
+
+Recent Chats Sidebar Requirements:
+- Automatically display latest conversations after login
+- Sort chats by updatedAt descending
+- Show conversation titles
+- Highlight active conversation
+- Infinite scroll or pagination support
+- Conversation hover actions
+- Delete conversation option
+- Rename conversation option
+- New Chat button
+- Search/filter conversations
+
+Backend Requirements:
+- REST API architecture
+- Controllers
+- Routes
+- Middleware
+- MongoDB models
+- Clerk token verification middleware
+- Scalable folder structure
+- Secure APIs
+- Error handling
+
+Database Models:
+
+User:
+- clerkId
+- email
+- name
+- imageUrl
+- createdAt
+
+Conversation:
+- userId
+- title
+- createdAt
+- updatedAt
+- lastMessage
+
+Message:
+- conversationId
+- role (user/assistant)
+- content
+- timestamp
+
+Required APIs:
+1. Create conversation
+2. Get all conversations for logged-in user
+3. Get recent conversations sorted by updatedAt
+4. Get conversation messages
+5. Save messages
+6. Delete conversation
+7. Rename conversation
+8. Search conversations
+
+Important Logic:
+- Whenever user signs in, automatically fetch all previous chats
+- Persist conversations even after logout
+- Restore active conversation on refresh
+- Auto-update sidebar when new message arrives
+- Update conversation timestamps dynamically
+
+Architecture Requirements:
+- Clean scalable architecture
+- Reusable hooks
+- API abstraction layer
+- State management
+- Optimistic UI updates
+- Production-grade folder organization
+
+Security Requirements:
+- Protected backend routes
+- Clerk JWT verification
+- Environment variables
+- User-based access control
+- Secure MongoDB connection
+
+Output:
+1. Complete folder structure
+2. Clerk setup
+3. MongoDB models
+4. Backend APIs
+5. Frontend auth flow
+6. Recent chats sidebar implementation
+7. Persistent chat logic
+8. Protected routes
+9. Auto-fetch recent chats after login
+10. Production-ready scalable architecture
+
+The final application should:
+- Feel like ChatGPT + premium healthcare SaaS
+- Have seamless persistent chat history
+- Look polished and futuristic
+- Impress FAANG recruiters
+- Follow senior-level engineering practices

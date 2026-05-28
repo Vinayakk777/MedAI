@@ -1,144 +1,122 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, PanelLeftClose, PanelLeftOpen, Sparkles } from "lucide-react";
-import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChatSidebar, type ServerConversation } from "@/components/chat/ChatSidebar";
 import { ChatMessage, type Message } from "@/components/chat/ChatMessage";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { SuggestionChips } from "@/components/chat/SuggestionChips";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { MessageSkeleton } from "@/components/chat/MessageSkeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
-const AI_RESPONSES: string[] = [
-  `Based on your description, this is consistent with a **tension-type headache** — the most common headache type, often triggered by stress, dehydration, or prolonged screen time.
+type ServerMessage = {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
 
-**Immediate recommendations:**
-- Drink 2–3 glasses of water over the next hour
-- Take **acetaminophen 500–1000mg** or **ibuprofen 400mg** with food
-- Rest in a quiet, dimly lit environment for 20–30 minutes
+const MIN_TYPING_MS = 900;
 
-**Monitor for red flags:**
-- Sudden, severe "thunderclap" onset
-- Fever above 38.5°C (101.3°F) with neck stiffness
-- Visual disturbances or confusion
-- Headache that wakes you from sleep
+function toClientMsg(m: ServerMessage): Message {
+  return {
+    id: m.id,
+    role: m.role === "assistant" ? "ai" : "user",
+    content: m.content,
+    timestamp: new Date(m.createdAt),
+  };
+}
 
-> If symptoms persist beyond 72 hours or worsen significantly, please consult your physician.`,
-
-  `I can help you check that interaction. Based on the medications you've mentioned:
-
-**Potential interaction identified:**
-
-**Ibuprofen + Lisinopril** — *Moderate concern*
-- NSAIDs like ibuprofen can reduce the antihypertensive effect of ACE inhibitors
-- May increase risk of acute kidney injury with long-term combined use
-
-**Safer alternative:**
-Consider **acetaminophen (Tylenol)** for pain relief — it does not share this interaction profile.
-
-**What I recommend:**
-1. Switch to acetaminophen for occasional pain management
-2. Mention this to your prescribing physician at your next visit
-3. Avoid regular NSAID use while on lisinopril
-
-> This information is educational. Do not change your medications without consulting your doctor.`,
-
-  `Thank you for sharing that. Let me walk you through what this could mean.
-
-**Most likely possibilities** (based on your description):
-
-1. **Contact dermatitis** — reaction to soap, detergent, or fabric
-2. **Eczema (atopic dermatitis)** — especially if you have a history of allergies
-3. **Tinea (ringworm)** — fungal infection, common and easily treated
-
-**Key questions to help narrow this down:**
-- Is it spreading or staying localized?
-- Is it itchy, painful, or neither?
-- Have you changed any products recently (soap, laundry detergent, lotion)?
-
-**For now:**
-- Avoid scratching — it can introduce bacteria
-- Apply a fragrance-free moisturizer
-- Consider 1% hydrocortisone cream for itch relief (available OTC)
-
-> If the rash spreads, develops blisters, or is accompanied by fever, seek in-person evaluation promptly.`,
-
-  `That's a great question about vitamin supplementation. Here's what the evidence says:
-
-**Vitamin D Deficiency — Signs & Symptoms:**
-- Fatigue and low energy
-- Bone or muscle aches
-- Frequent infections (vitamin D supports immune function)
-- Low mood or seasonal depression
-
-**Testing:**
-A simple blood test (25-hydroxyvitamin D) confirms deficiency. Optimal range is typically **40–60 ng/mL**.
-
-**General supplementation guidance:**
-- Mild deficiency: **1,000–2,000 IU daily**
-- Moderate deficiency: **2,000–4,000 IU daily** (physician-guided)
-- Take with a meal containing fat for best absorption
-- Vitamin D3 (cholecalciferol) is preferred over D2
-
-**Food sources:**
-Fatty fish (salmon, mackerel), egg yolks, fortified dairy, and sun exposure (15–20 min/day).
-
-> Ask your doctor to run a baseline 25(OH)D level before starting supplementation.`,
-
-  `I understand you're concerned about when to seek care. Here's a framework that clinicians use:
-
-**See a doctor within 24 hours if you have:**
-- High fever (>39°C / 102°F) not responding to medication
-- Severe, worsening or unusual pain
-- Symptoms that are rapidly progressing
-
-**Go to urgent care today if you notice:**
-- Shortness of breath with exertion
-- Signs of infection (redness, warmth, swelling, discharge)
-- Uncontrolled vomiting or inability to keep fluids down
-
-**Call 911 or go to the ER immediately for:**
-- Chest pain or pressure
-- Sudden severe headache
-- Facial drooping, arm weakness, or speech difficulty
-- Difficulty breathing at rest
-- Signs of severe allergic reaction (throat swelling, hives with breathing changes)
-
-**You can monitor at home if:**
-- Symptoms are mild and improving
-- No red flag symptoms are present
-- You are able to stay hydrated and rest
-
-> When in doubt, trust your instincts — it's always better to be seen and reassured than to wait on something serious.`
-];
-
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: "seed-1",
-    role: "user",
-    content: "I've had a dull headache for the past two days, mostly around my forehead. It's not terrible, maybe a 4/10, but it won't go away.",
-    timestamp: new Date(Date.now() - 12 * 60 * 1000),
-  },
-  {
-    id: "seed-2",
-    role: "ai",
-    content: AI_RESPONSES[0],
-    timestamp: new Date(Date.now() - 11 * 60 * 1000),
-  },
-];
-
-let responseIndex = 1;
+async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${body}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as T;
+}
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const queryClient = useQueryClient();
+
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeConvId, setActiveConvId] = useState("1");
-  const [isNewChat, setIsNewChat] = useState(false);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // ---------- queries ----------
+
+  const { data: conversations = [], isLoading: convsLoading } = useQuery<ServerConversation[]>({
+    queryKey: ["conversations"],
+    queryFn: () => apiFetch("/api/conversations"),
+  });
+
+  const { data: convData, isLoading: msgsLoading } = useQuery<
+    ServerConversation & { messages: ServerMessage[] }
+  >({
+    queryKey: ["conversation", activeConvId],
+    queryFn: () => apiFetch(`/api/conversations/${activeConvId}`),
+    enabled: !!activeConvId,
+  });
+
+  useEffect(() => {
+    if (convData?.messages) {
+      setMessages(convData.messages.map(toClientMsg));
+    }
+  }, [convData]);
+
+  // ---------- mutations ----------
+
+  const createConv = useMutation({
+    mutationFn: (title: string) =>
+      apiFetch<ServerConversation>("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+
+  const deleteConv = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/conversations/${id}`, { method: "DELETE" }),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (activeConvId === id) {
+        setActiveConvId(null);
+        setMessages([]);
+      }
+    },
+  });
+
+  const renameConv = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
+      apiFetch<ServerConversation>(`/api/conversations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+
+  const sendMsg = useMutation({
+    mutationFn: ({ id, content }: { id: string; content: string }) =>
+      apiFetch<{ userMessage: ServerMessage; aiMessage: ServerMessage }>(
+        `/api/conversations/${id}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        },
+      ),
+  });
+
+  // ---------- handlers ----------
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -148,56 +126,81 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
 
-  const sendMessage = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || isTyping) return;
+  const sendMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isTyping) return;
 
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: trimmed,
-      timestamp: new Date(),
-    };
+      let convId = activeConvId;
+      if (!convId) {
+        try {
+          const conv = await createConv.mutateAsync("New Conversation");
+          convId = conv.id;
+          setActiveConvId(convId);
+        } catch {
+          return;
+        }
+      }
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setIsNewChat(false);
-    setIsTyping(true);
+      const tempId = `temp-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: tempId, role: "user", content: trimmed, timestamp: new Date() },
+      ]);
+      setInput("");
+      setIsTyping(true);
+      const start = Date.now();
 
-    const delay = 1400 + Math.random() * 1200;
-    setTimeout(() => {
-      const aiContent = AI_RESPONSES[responseIndex % AI_RESPONSES.length];
-      responseIndex++;
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "ai",
-        content: aiContent,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, aiMsg]);
-      setIsTyping(false);
-    }, delay);
-  }, [isTyping]);
+      try {
+        const { userMessage, aiMessage } = await sendMsg.mutateAsync({
+          id: convId,
+          content: trimmed,
+        });
+
+        const elapsed = Date.now() - start;
+        if (elapsed < MIN_TYPING_MS) {
+          await new Promise((r) => setTimeout(r, MIN_TYPING_MS - elapsed));
+        }
+
+        setMessages((prev) => [
+          ...prev.filter((m) => m.id !== tempId),
+          toClientMsg(userMessage),
+          toClientMsg(aiMessage),
+        ]);
+        setIsTyping(false);
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      } catch {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setIsTyping(false);
+      }
+    },
+    [isTyping, activeConvId, createConv, sendMsg, queryClient],
+  );
 
   const handleNewChat = useCallback(() => {
+    setActiveConvId(null);
     setMessages([]);
-    setIsNewChat(true);
     setInput("");
     setIsTyping(false);
-    setActiveConvId("");
   }, []);
 
-  const handleSelectConversation = useCallback((id: string) => {
-    setActiveConvId(id);
-    setIsNewChat(false);
-    setIsLoading(true);
-    setTimeout(() => {
-      setMessages(INITIAL_MESSAGES);
-      setIsLoading(false);
-    }, 700);
-  }, []);
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (id === activeConvId) return;
+      setActiveConvId(id);
+      setMessages([]);
+    },
+    [activeConvId],
+  );
+
+  // ---------- derived ----------
+
+  const activeTitle =
+    convData?.title ??
+    conversations.find((c) => c.id === activeConvId)?.title;
 
   const isEmpty = messages.length === 0 && !isTyping;
+  const isLoadingMessages = !!activeConvId && msgsLoading;
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -208,13 +211,17 @@ export default function ChatPage() {
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 260, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] as const }}
             className="flex-shrink-0 overflow-hidden"
           >
             <ChatSidebar
+              conversations={conversations}
+              isLoading={convsLoading}
               activeId={activeConvId}
-              onSelect={handleSelectConversation}
+              onSelect={handleSelect}
               onNewChat={handleNewChat}
+              onDelete={(id) => deleteConv.mutate(id)}
+              onRename={(id, title) => renameConv.mutate({ id, title })}
             />
           </motion.div>
         )}
@@ -226,7 +233,8 @@ export default function ChatPage() {
         <div className="flex-shrink-0 bg-rose-500/8 border-b border-rose-500/12 px-4 py-2 flex items-center justify-center gap-2">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
           <span className="text-xs text-rose-400/80 font-medium">
-            For emergencies, call <strong className="text-rose-400">911</strong> immediately. MedAI is not a substitute for emergency care.
+            For emergencies, call <strong className="text-rose-400">911</strong> immediately.
+            MedAI is not a substitute for emergency care.
           </span>
         </div>
 
@@ -248,7 +256,7 @@ export default function ChatPage() {
 
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-foreground">
-                {isNewChat || isEmpty ? "New Conversation" : "Persistent headache"}
+                {activeTitle ?? "New Conversation"}
               </span>
               <span className="hidden sm:flex items-center gap-1 text-[10px] text-emerald-400/70 bg-emerald-500/8 border border-emerald-500/15 px-2 py-0.5 rounded-full font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
@@ -267,7 +275,7 @@ export default function ChatPage() {
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto">
-          {isLoading ? (
+          {isLoadingMessages ? (
             <div className="max-w-3xl mx-auto px-4 pt-8">
               <MessageSkeleton />
             </div>
@@ -285,9 +293,7 @@ export default function ChatPage() {
                 ))}
               </AnimatePresence>
 
-              <AnimatePresence>
-                {isTyping && <TypingIndicator />}
-              </AnimatePresence>
+              <AnimatePresence>{isTyping && <TypingIndicator />}</AnimatePresence>
 
               <div ref={bottomRef} />
             </div>
@@ -296,7 +302,7 @@ export default function ChatPage() {
 
         {/* Input Area */}
         <div className="flex-shrink-0 bg-background/95 backdrop-blur-md border-t border-white/5">
-          {!isEmpty && !isLoading && (
+          {!isEmpty && !isLoadingMessages && (
             <div className="max-w-3xl mx-auto px-4 pt-3">
               <SuggestionChips onSelect={(label) => setInput(label)} />
             </div>

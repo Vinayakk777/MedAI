@@ -6,67 +6,138 @@ import {
   MessageSquare,
   ArrowLeft,
   Trash2,
-  Settings,
+  Pencil,
   Search,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-type ConversationItem = {
+export type ServerConversation = {
   id: string;
   title: string;
-  preview: string;
-  time: string;
+  lastMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
-const CONVERSATION_GROUPS: { label: string; items: ConversationItem[] }[] = [
-  {
-    label: "Today",
-    items: [
-      { id: "1", title: "Persistent headache", preview: "Tension-type headache assessment...", time: "2:34 PM" },
-      { id: "2", title: "Lower back pain", preview: "After lifting injury guidance...", time: "11:08 AM" },
-    ],
-  },
-  {
-    label: "Yesterday",
-    items: [
-      { id: "3", title: "Skin rash on forearm", preview: "Contact dermatitis evaluation...", time: "6:52 PM" },
-      { id: "4", title: "Vitamin D deficiency", preview: "Supplement dosage recommendations...", time: "3:15 PM" },
-    ],
-  },
-  {
-    label: "Last 7 Days",
-    items: [
-      { id: "5", title: "Allergy medication timing", preview: "Cetirizine vs loratadine...", time: "Mon" },
-      { id: "6", title: "Sleep disorder symptoms", preview: "Insomnia pattern analysis...", time: "Sun" },
-      { id: "7", title: "Medication interaction check", preview: "Lisinopril + ibuprofen...", time: "Sat" },
-    ],
-  },
-];
-
 interface ChatSidebarProps {
-  activeId?: string;
+  conversations: ServerConversation[];
+  isLoading?: boolean;
+  activeId: string | null;
   onSelect: (id: string) => void;
   onNewChat: () => void;
+  onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
 }
 
-export function ChatSidebar({ activeId = "1", onSelect, onNewChat }: ChatSidebarProps) {
+function formatTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays === 0) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return date.toLocaleDateString([], { weekday: "short" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function getDateGroup(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return "Last 7 Days";
+  return "Older";
+}
+
+function groupConversations(convs: ServerConversation[]) {
+  const order = ["Today", "Yesterday", "Last 7 Days", "Older"];
+  const map: Record<string, ServerConversation[]> = {};
+  for (const c of convs) {
+    const label = getDateGroup(c.updatedAt);
+    if (!map[label]) map[label] = [];
+    map[label].push(c);
+  }
+  return order
+    .filter((l) => map[l]?.length)
+    .map((l) => ({ label: l, items: map[l] }));
+}
+
+function SidebarSkeleton() {
+  return (
+    <div className="space-y-1 px-2 pt-2">
+      {[0.8, 0.6, 0.9, 0.7, 0.75].map((opacity, i) => (
+        <div
+          key={i}
+          className="h-[52px] rounded-xl bg-white/4 animate-pulse"
+          style={{ opacity }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RenameInput({
+  initialValue,
+  onConfirm,
+  onCancel,
+}: {
+  initialValue: string;
+  onConfirm: (v: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onConfirm(value.trim() || initialValue);
+        if (e.key === "Escape") onCancel();
+      }}
+      onBlur={() => onConfirm(value.trim() || initialValue)}
+      className="w-full text-xs font-medium bg-background/60 border border-primary/30 rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:border-primary/60"
+      data-testid="input-rename-conversation"
+      autoFocus
+    />
+  );
+}
+
+export function ChatSidebar({
+  conversations,
+  isLoading = false,
+  activeId,
+  onSelect,
+  onNewChat,
+  onDelete,
+  onRename,
+}: ChatSidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
-  const filtered = CONVERSATION_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter(
-      (item) =>
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.preview.toLowerCase().includes(searchQuery.toLowerCase())
-    ),
-  })).filter((g) => g.items.length > 0);
+  const filtered = conversations.filter(
+    (c) =>
+      c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.lastMessage ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
+  );
+
+  const groups = groupConversations(filtered);
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-white/5">
       {/* Header */}
-      <div className="p-4 flex items-center justify-between h-[60px] border-b border-white/5 flex-shrink-0">
+      <div className="p-4 flex items-center h-[60px] border-b border-white/5 flex-shrink-0">
         <Link href="/" className="flex items-center gap-2 group">
           <div className="w-7 h-7 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center text-primary group-hover:bg-primary/20 transition-colors">
             <Activity className="w-4 h-4" />
@@ -104,76 +175,126 @@ export function ChatSidebar({ activeId = "1", onSelect, onNewChat }: ChatSidebar
 
       {/* Conversation List */}
       <ScrollArea className="flex-1 px-2">
-        <div className="pb-2 space-y-4">
-          <AnimatePresence>
-            {filtered.map((group) => (
-              <div key={group.label}>
-                <p className="px-2 text-[10px] font-semibold text-muted-foreground/40 uppercase tracking-widest mb-1 pt-2">
-                  {group.label}
-                </p>
-                <div className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const isActive = item.id === activeId;
-                    return (
-                      <motion.div
-                        key={item.id}
-                        layout
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="relative group/item"
-                        onMouseEnter={() => setHoveredId(item.id)}
-                        onMouseLeave={() => setHoveredId(null)}
-                      >
-                        <button
-                          onClick={() => onSelect(item.id)}
-                          data-testid={`conversation-item-${item.id}`}
-                          className={`w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 ${
-                            isActive
-                              ? "bg-primary/12 border border-primary/20 text-foreground"
-                              : "text-muted-foreground hover:bg-white/4 hover:text-foreground"
-                          }`}
+        {isLoading ? (
+          <SidebarSkeleton />
+        ) : (
+          <div className="pb-2 space-y-4">
+            <AnimatePresence>
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <p className="px-2 text-[10px] font-semibold text-muted-foreground/40 uppercase tracking-widest mb-1 pt-2">
+                    {group.label}
+                  </p>
+                  <div className="space-y-0.5">
+                    {group.items.map((item) => {
+                      const isActive = item.id === activeId;
+                      const isRenaming = item.id === renamingId;
+                      return (
+                        <motion.div
+                          key={item.id}
+                          layout
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="relative group/item"
+                          onMouseEnter={() => setHoveredId(item.id)}
+                          onMouseLeave={() => setHoveredId(null)}
                         >
-                          <div className="flex items-start gap-2.5 min-w-0">
-                            <MessageSquare className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/40"}`} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs font-medium truncate">{item.title}</span>
-                                <span className="text-[10px] text-muted-foreground/30 flex-shrink-0">{item.time}</span>
+                          <button
+                            onClick={() => !isRenaming && onSelect(item.id)}
+                            data-testid={`conversation-item-${item.id}`}
+                            className={`w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 ${
+                              isActive
+                                ? "bg-primary/12 border border-primary/20 text-foreground"
+                                : "text-muted-foreground hover:bg-white/4 hover:text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-start gap-2.5 min-w-0">
+                              <MessageSquare
+                                className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${
+                                  isActive ? "text-primary" : "text-muted-foreground/40"
+                                }`}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  {isRenaming ? (
+                                    <RenameInput
+                                      initialValue={item.title}
+                                      onConfirm={(v) => {
+                                        setRenamingId(null);
+                                        if (v !== item.title) onRename(item.id, v);
+                                      }}
+                                      onCancel={() => setRenamingId(null)}
+                                    />
+                                  ) : (
+                                    <>
+                                      <span className="text-xs font-medium truncate">
+                                        {item.title}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground/30 flex-shrink-0">
+                                        {formatTime(item.updatedAt)}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                                {!isRenaming && item.lastMessage && (
+                                  <p className="text-[11px] text-muted-foreground/40 truncate mt-0.5">
+                                    {item.lastMessage}
+                                  </p>
+                                )}
                               </div>
-                              <p className="text-[11px] text-muted-foreground/40 truncate mt-0.5">{item.preview}</p>
                             </div>
-                          </div>
-                        </button>
+                          </button>
 
-                        {/* Hover delete */}
-                        <AnimatePresence>
-                          {hoveredId === item.id && !isActive && (
-                            <motion.button
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              exit={{ opacity: 0 }}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground/30 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                              aria-label="Delete conversation"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </motion.button>
-                          )}
-                        </AnimatePresence>
-                      </motion.div>
-                    );
-                  })}
+                          {/* Hover actions */}
+                          <AnimatePresence>
+                            {hoveredId === item.id && !isRenaming && (
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5"
+                              >
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRenamingId(item.id);
+                                  }}
+                                  className="p-1 rounded-md text-muted-foreground/30 hover:text-primary hover:bg-primary/10 transition-colors"
+                                  aria-label="Rename conversation"
+                                  data-testid={`button-rename-${item.id}`}
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(item.id);
+                                  }}
+                                  className="p-1 rounded-md text-muted-foreground/30 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                  aria-label="Delete conversation"
+                                  data-testid={`button-delete-${item.id}`}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </AnimatePresence>
+              ))}
+            </AnimatePresence>
 
-          {filtered.length === 0 && (
-            <p className="text-xs text-muted-foreground/40 text-center py-6">
-              No conversations found
-            </p>
-          )}
-        </div>
+            {!isLoading && groups.length === 0 && (
+              <p className="text-xs text-muted-foreground/40 text-center py-6 px-2">
+                {searchQuery ? "No conversations found" : "No conversations yet"}
+              </p>
+            )}
+          </div>
+        )}
       </ScrollArea>
 
       {/* Footer */}
@@ -185,10 +306,6 @@ export function ChatSidebar({ activeId = "1", onSelect, onNewChat }: ChatSidebar
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to website
         </Link>
-        <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-white/4 transition-all">
-          <Settings className="w-3.5 h-3.5" />
-          Settings
-        </button>
       </div>
     </div>
   );

@@ -36,7 +36,7 @@ function RiskBar({ label, score, color, level, index }: { label: string; score: 
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${score}%` }}
-          transition={{ duration: 0.8, delay: 0.4 + index * 0.1, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.8, delay: 0.4 + index * 0.1, ease: [0.22, 1, 0.36, 1] as const }}
           className="h-full rounded-full"
           style={{ background: color }}
         />

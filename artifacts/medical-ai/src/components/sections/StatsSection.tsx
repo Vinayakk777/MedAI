@@ -28,7 +28,7 @@ function AnimatedCounter({ end, suffix = "", prefix = "", decimals = 0, duration
     const node = nodeRef.current;
     const controls = animate(0, end, {
       duration,
-      ease: [0.22, 1, 0.36, 1],
+      ease: [0.22, 1, 0.36, 1] as const,
       onUpdate(value) {
         node.textContent = prefix + value.toFixed(decimals) + suffix;
       },
@@ -126,7 +126,7 @@ export function StatsSection() {
                 initial={{ opacity: 0, y: 28 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.55, delay: index * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: 0.55, delay: index * 0.1, ease: [0.22, 1, 0.36, 1] as const }}
                 data-testid={`stat-card-${index}`}
                 className="group relative"
               >

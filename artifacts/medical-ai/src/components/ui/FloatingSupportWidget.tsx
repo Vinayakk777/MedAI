@@ -51,7 +51,7 @@ export function FloatingSupportWidget() {
             initial={{ opacity: 0, scale: 0.9, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 8 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] as const }}
             className="w-72 rounded-2xl border border-white/8 bg-card/95 backdrop-blur-2xl shadow-2xl overflow-hidden"
           >
             {/* Header */}

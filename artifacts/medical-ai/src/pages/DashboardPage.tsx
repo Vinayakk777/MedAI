@@ -63,7 +63,7 @@ export default function DashboardPage() {
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 240, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] as const }}
             className="hidden md:flex flex-col flex-shrink-0 bg-card border-r border-white/5 overflow-hidden"
           >
             {/* Logo */}

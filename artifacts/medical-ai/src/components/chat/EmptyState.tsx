@@ -55,7 +55,7 @@ export function EmptyState({ onSelect }: EmptyStateProps) {
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] as const }}
       className="flex flex-col items-center justify-center h-full py-12 px-4 max-w-2xl mx-auto"
     >
       <motion.div

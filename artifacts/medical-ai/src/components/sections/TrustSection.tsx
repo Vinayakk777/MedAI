@@ -72,7 +72,7 @@ export function TrustSection() {
                 initial={{ opacity: 0, y: 24 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: index * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: 0.5, delay: index * 0.1, ease: [0.22, 1, 0.36, 1] as const }}
                 data-testid={`trust-badge-${index}`}
                 className={`group rounded-2xl border ${badge.border} bg-background/60 p-6 hover:bg-background/80 transition-all duration-300`}
               >

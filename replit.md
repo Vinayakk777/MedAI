@@ -1,45 +1,82 @@
-# [Project name]
+# MedAI — AI Medical Chatbot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A premium AI-powered healthcare SaaS application. Provides instant health guidance, symptom analysis, medication lookup, and a full analytics dashboard. Designed to Stripe/Linear/Apple quality standards.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
+- `pnpm --filter @workspace/medical-ai run dev` — run the React frontend (Vite, uses `PORT` env var)
+- `pnpm --filter @workspace/api-server run dev` — run the Express API server (port 8080)
+- `pnpm run typecheck` — full typecheck across all packages (libs first, then leaf packages)
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm --filter @workspace/db run push` — push DB schema changes to dev database (dev only)
+- Required env: `DATABASE_URL`, `SESSION_SECRET`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- pnpm workspaces monorepo, Node.js 24, TypeScript 5.9
+- **Frontend:** React 18, Vite 7, Tailwind CSS v4, Framer Motion 12, Recharts 2, shadcn/ui, Wouter, TanStack Query 5, Lucide React
+- **Backend:** Express 5, Drizzle ORM, PostgreSQL 16, Zod v4, pino logging
+- **API contract:** OpenAPI 3.1 → Orval codegen → Zod schemas + React Query hooks
+- **Auth (planned):** JWT (jsonwebtoken), bcryptjs, express-rate-limit
+- **Build:** esbuild (CJS bundle for API), Vite (ESM for frontend)
 
-## Where things live
+## Where Things Live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/medical-ai/src/pages/` — route-level pages (lazy loaded): HomePage, ChatPage, DashboardPage, AboutPage
+- `artifacts/medical-ai/src/components/chat/` — 8 chat components (ChatMessage, ChatInput, ChatSidebar, TypingIndicator, SuggestionChips, EmptyState, MessageSkeleton, MarkdownContent)
+- `artifacts/medical-ai/src/components/dashboard/` — 8 dashboard modules (HealthOverviewCards, HealthTrendsChart, RiskAnalysisChart, VitalsPanel, SymptomCheckerWidget, MedicationLookup, HealthReports, EmergencySuggestions)
+- `artifacts/medical-ai/src/components/sections/` — 6 landing page sections (Hero, Features, Stats, HowItWorks, Testimonials, Trust)
+- `artifacts/medical-ai/src/components/ui/` — primitive components (shadcn/ui + ErrorBoundary, PageTransition, Skeleton, FloatingSupportWidget)
+- `artifacts/medical-ai/src/index.css` — design tokens (CSS vars), shimmer animation, scrollbar, focus rings
+- `artifacts/api-server/src/routes/` — Express route handlers (health check; auth + chat routes planned)
+- `lib/db/src/schema/` — Drizzle table definitions (source of truth for DB schema)
+- `lib/api-spec/openapi.yaml` — OpenAPI spec (source of truth for API contract)
+- `lib/api-zod/src/generated/` — generated Zod schemas (do not edit manually)
+- `lib/api-client-react/src/generated/` — generated React Query hooks (do not edit manually)
 
-## Architecture decisions
+## Architecture Decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- **OpenAPI contract-first:** The YAML spec drives codegen for both Zod (server validation) and React Query (client hooks) — breaking API changes are caught at compile time across the full stack
+- **Monorepo with composite libs:** `lib/*` packages are TypeScript composite + emit declarations; `artifacts/*` are leaf packages that consume them
+- **Wouter over React Router:** 2.1KB vs 50KB+ for simple SPA routing — sufficient for this project's needs
+- **AnimatePresence with `mode="wait"`:** Page transitions wait for the current page to fully exit before mounting the next, preventing visual overlap
+- **IntersectionObserver for animations:** Scroll-triggered animations use IntersectionObserver instead of scroll event listeners — avoids main-thread jank
+- **Custom Markdown renderer:** Built from scratch (no external deps) — parses bold, italic, inline code, code blocks, lists, blockquotes. Avoids importing marked/remark (adds ~40KB)
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+**Landing Page:** Animated hero, stats, 6 feature cards, how-it-works steps, 6 testimonials, trust/compliance badges, newsletter signup
 
-## User preferences
+**AI Chat Interface:** Full-screen chat with collapsible history sidebar, streaming-style responses, suggestion chips, empty state with quick actions, typing indicator, message copy/feedback
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+**Health Dashboard:** 4 overview stat cards, health trend charts (Heart Rate / BP / Sleep / Activity), risk analysis RadarChart, vital signs panel, symptom checker, medication guide, AI health reports, emergency triage guide
+
+**Floating Support Widget:** Quick-access button on every page linking to Chat, Dashboard, and Emergency Guide
+
+## User Preferences
+
+- No explicit `import React` — Vite JSX transformer handles it
+- No `react-icons/si` — use Lucide React exclusively
+- Tailwind CSS only for styling — no inline style except for dynamic values (colors from data)
+- Framer Motion for all animations — no CSS `@keyframes` for component animations
+- shadcn/ui as the component primitive layer — extend, don't fight it
+- Components in feature folders (`chat/`, `dashboard/`, `sections/`) — not a flat components dir
+- `data-testid` attributes on all interactive elements
+- Always `req.log` inside route handlers, `logger` singleton outside request context
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- **Never use `console.log` in server code** — use `req.log` (route handlers) or `logger` (non-request code)
+- **Do not run `pnpm dev` at workspace root** — no root dev script; run per-artifact with `--filter`
+- **Verify artifacts with `typecheck`, not `build`** — build needs `PORT` + `BASE_PATH` env vars wired by the workflow
+- **AnimatePresence requires a `key` on the Switch** — use `useLocation()` key to trigger exit animations on route change
+- **OpenAI via Replit AI Integrations proxy** — `AI_INTEGRATIONS_OPENAI_API_KEY` is a dummy string; `AI_INTEGRATIONS_OPENAI_BASE_URL` is the real config
+- **Recharts responsive containers** need an explicit parent height — wrap in a div with `h-[Npx]` or `h-full`
+- **Drizzle push vs migrate** — use `push` in development (dev only!); in production use proper migrations
 
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See `README.md` for full project documentation, deployment guides, and API reference
+- See `PORTFOLIO.md` for resume bullets, LinkedIn post, and recruiter-ready materials

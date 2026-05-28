@@ -6,10 +6,11 @@ import { StatsSection } from "@/components/sections/StatsSection";
 import { HowItWorksSection } from "@/components/sections/HowItWorksSection";
 import { TestimonialsSection } from "@/components/sections/TestimonialsSection";
 import { TrustSection } from "@/components/sections/TrustSection";
+import { PageTransition } from "@/components/ui/PageTransition";
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen flex flex-col">
+    <PageTransition className="min-h-screen flex flex-col">
       <Navbar />
       <main className="flex-grow">
         <HeroSection />
@@ -20,6 +21,6 @@ export default function HomePage() {
         <TrustSection />
       </main>
       <Footer />
-    </div>
+    </PageTransition>
   );
 }

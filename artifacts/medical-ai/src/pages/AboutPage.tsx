@@ -2,6 +2,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Scale, Shield, Users } from "lucide-react";
+import { PageTransition } from "@/components/ui/PageTransition";
 
 export default function AboutPage() {
   const team = [
@@ -23,7 +24,7 @@ export default function AboutPage() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <PageTransition className="min-h-screen flex flex-col bg-background">
       <Navbar />
       
       <main className="flex-grow pt-32 pb-24">
@@ -113,6 +114,6 @@ export default function AboutPage() {
       </main>
       
       <Footer />
-    </div>
+    </PageTransition>
   );
 }

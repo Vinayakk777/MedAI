@@ -129,7 +129,20 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const { user } = useUser();
   const mainRef = useRef<HTMLDivElement>(null);
+
+  const displayName =
+    user?.fullName ??
+    user?.firstName ??
+    user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ??
+    "User";
+  const avatarInitials = displayName
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   const scrollTo = (id: string) => {
     setActiveSection(id);
@@ -163,12 +176,22 @@ export default function DashboardPage() {
             {/* User profile */}
             <div className="px-4 py-4 border-b border-white/5 flex-shrink-0">
               <div className="flex items-center gap-3 p-2.5 rounded-xl bg-background/40 border border-white/5">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                  JD
-                </div>
+                {user?.imageUrl ? (
+                  <img
+                    src={user.imageUrl}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover ring-2 ring-primary/30 flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-primary text-xs font-bold flex-shrink-0">
+                    {avatarInitials}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-foreground truncate">John Doe</p>
-                  <p className="text-[10px] text-muted-foreground/50 truncate">Patient ID #48291</p>
+                  <p className="text-xs font-semibold text-foreground truncate">{displayName}</p>
+                  <p className="text-[10px] text-muted-foreground/50 truncate">
+                    {user?.emailAddresses?.[0]?.emailAddress ?? ""}
+                  </p>
                 </div>
                 <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
               </div>

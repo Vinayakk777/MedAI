@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, PanelLeftClose, PanelLeftOpen, Sparkles, LayoutDashboard, LogOut } from "lucide-react";
+import { AlertTriangle, PanelLeftClose, PanelLeftOpen, Sparkles, LayoutDashboard, LogOut, UserRound } from "lucide-react";
+import { ProfileModal } from "@/components/profile/ProfileModal";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser, useClerk } from "@clerk/react";
 import { ChatSidebar, type ServerConversation } from "@/components/chat/ChatSidebar";
@@ -45,6 +46,7 @@ function ChatUserNav() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -108,6 +110,13 @@ function ChatUserNav() {
                 <LayoutDashboard className="w-3.5 h-3.5" />
                 Dashboard
               </Link>
+              <button
+                onClick={() => { setOpen(false); setShowProfile(true); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-white/4 transition-colors"
+              >
+                <UserRound className="w-3.5 h-3.5" />
+                Edit profile
+              </button>
             </div>
             <div className="border-t border-white/5 py-1">
               <button
@@ -121,6 +130,7 @@ function ChatUserNav() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
     </div>
   );
 }

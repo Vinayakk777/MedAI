@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Sun, Moon, Activity, LogOut, LayoutDashboard, MessageSquare } from "lucide-react";
+import { Menu, X, Sun, Moon, Activity, LogOut, LayoutDashboard, MessageSquare, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 import { useUser, useClerk, Show } from "@clerk/react";
+import { ProfileModal } from "@/components/profile/ProfileModal";
 
 function UserAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   const { user } = useUser();
@@ -30,6 +31,7 @@ function UserMenu() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -88,6 +90,13 @@ function UserMenu() {
                 <LayoutDashboard className="w-4 h-4" />
                 Dashboard
               </Link>
+              <button
+                onClick={() => { setOpen(false); setShowProfile(true); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-white/4 transition-colors"
+              >
+                <UserRound className="w-4 h-4" />
+                Edit profile
+              </button>
             </div>
             <div className="border-t border-white/5 py-1">
               <button
@@ -102,6 +111,7 @@ function UserMenu() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
     </div>
   );
 }

@@ -4,10 +4,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity, LayoutDashboard, TrendingUp, ShieldAlert,
   Stethoscope, Pill, FileText, Siren, ArrowLeft,
-  Bell, Sun, Moon, Menu, X, MessageSquare, LogOut, Settings,
+  Bell, Sun, Moon, Menu, X, MessageSquare, LogOut, Settings, UserRound,
   HeartPulse,
 } from "lucide-react";
 import { useUser, useClerk } from "@clerk/react";
+import { ProfileModal } from "@/components/profile/ProfileModal";
 import { HealthOverviewCards } from "@/components/dashboard/HealthOverviewCards";
 import { HealthTrendsChart } from "@/components/dashboard/HealthTrendsChart";
 import { RiskAnalysisChart } from "@/components/dashboard/RiskAnalysisChart";
@@ -44,6 +45,7 @@ function DashUserNav() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -107,6 +109,13 @@ function DashUserNav() {
                 <MessageSquare className="w-3.5 h-3.5" />
                 Chat
               </Link>
+              <button
+                onClick={() => { setOpen(false); setShowProfile(true); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-white/4 transition-colors"
+              >
+                <UserRound className="w-3.5 h-3.5" />
+                Edit profile
+              </button>
             </div>
             <div className="border-t border-white/5 py-1">
               <button
@@ -120,6 +129,7 @@ function DashUserNav() {
           </motion.div>
         )}
       </AnimatePresence>
+      <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
     </div>
   );
 }

@@ -1,0 +1,2 @@
+- [Clerk afterSignInUrl](clerk-redirect.md) — `afterSignInUrl`/`afterSignUpUrl` are NOT valid ClerkProvider props; use HomeRedirect component for post-login routing instead.
+- [OpenAI streaming SSE](openai-sse.md) — Backend streams `data: {content}` chunks then `data: {done, userMessage, aiMessage}`; frontend reads with `getReader()` + `TextDecoder`, shows typing indicator until first token, then switches to streaming message.

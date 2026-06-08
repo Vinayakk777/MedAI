@@ -1,107 +1,23 @@
 import { Router, type IRouter } from "express";
+import OpenAI from "openai";
 import { db } from "@workspace/db";
 import { conversationsTable, messagesTable } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 
-const AI_RESPONSES = [
-  `Based on your description, this is consistent with a **tension-type headache** — the most common headache type, often triggered by stress, dehydration, or prolonged screen time.
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-**Immediate recommendations:**
-- Drink 2–3 glasses of water over the next hour
-- Take **acetaminophen 500–1000mg** or **ibuprofen 400mg** with food
-- Rest in a quiet, dimly lit environment for 20–30 minutes
+const SYSTEM_PROMPT = `You are MedAI, a knowledgeable and empathetic AI medical assistant. You provide accurate, evidence-based health guidance to help people understand their symptoms, medications, and health conditions.
 
-**Monitor for red flags:**
-- Sudden, severe "thunderclap" onset
-- Fever above 38.5°C (101.3°F) with neck stiffness
-- Visual disturbances or confusion
-- Headache that wakes you from sleep
-
-> If symptoms persist beyond 72 hours or worsen significantly, please consult your physician.`,
-
-  `I can help you check that interaction. Based on the medications you've mentioned:
-
-**Potential interaction identified:**
-
-**Ibuprofen + Lisinopril** — *Moderate concern*
-- NSAIDs like ibuprofen can reduce the antihypertensive effect of ACE inhibitors
-- May increase risk of acute kidney injury with long-term combined use
-
-**Safer alternative:**
-Consider **acetaminophen (Tylenol)** for pain relief — it does not share this interaction profile.
-
-**What I recommend:**
-1. Switch to acetaminophen for occasional pain management
-2. Mention this to your prescribing physician at your next visit
-3. Avoid regular NSAID use while on lisinopril
-
-> This information is educational. Do not change your medications without consulting your doctor.`,
-
-  `Thank you for sharing that. Let me walk you through what this could mean.
-
-**Most likely possibilities** (based on your description):
-
-1. **Contact dermatitis** — reaction to soap, detergent, or fabric
-2. **Eczema (atopic dermatitis)** — especially if you have a history of allergies
-3. **Tinea (ringworm)** — fungal infection, common and easily treated
-
-**Key questions to help narrow this down:**
-- Is it spreading or staying localized?
-- Is it itchy, painful, or neither?
-- Have you changed any products recently (soap, laundry detergent, lotion)?
-
-**For now:**
-- Avoid scratching — it can introduce bacteria
-- Apply a fragrance-free moisturizer
-- Consider 1% hydrocortisone cream for itch relief (available OTC)
-
-> If the rash spreads, develops blisters, or is accompanied by fever, seek in-person evaluation promptly.`,
-
-  `That's a great question about vitamin supplementation. Here's what the evidence says:
-
-**Vitamin D Deficiency — Signs & Symptoms:**
-- Fatigue and low energy
-- Bone or muscle aches
-- Frequent infections (vitamin D supports immune function)
-- Low mood or seasonal depression
-
-**Testing:**
-A simple blood test (25-hydroxyvitamin D) confirms deficiency. Optimal range is typically **40–60 ng/mL**.
-
-**General supplementation guidance:**
-- Mild deficiency: **1,000–2,000 IU daily**
-- Moderate deficiency: **2,000–4,000 IU daily** (physician-guided)
-- Take with a meal containing fat for best absorption
-- Vitamin D3 (cholecalciferol) is preferred over D2
-
-> Ask your doctor to run a baseline 25(OH)D level before starting supplementation.`,
-
-  `I understand you're concerned about when to seek care. Here's a framework clinicians use:
-
-**Call 911 or go to the ER immediately for:**
-- Chest pain or pressure
-- Sudden severe headache
-- Facial drooping, arm weakness, or speech difficulty
-- Difficulty breathing at rest
-
-**Go to urgent care today if you notice:**
-- High fever (>39°C / 102°F) not responding to medication
-- Signs of infection (redness, warmth, swelling, discharge)
-- Uncontrolled vomiting or inability to keep fluids down
-
-**Monitor at home if:**
-- Symptoms are mild and steadily improving
-- No red flag symptoms are present
-- You are able to stay hydrated and rest
-
-> When in doubt, trust your instincts — it's always better to be seen and reassured than to wait on something serious.`,
-];
-
-let aiIndex = 0;
-function nextAIResponse(): string {
-  return AI_RESPONSES[aiIndex++ % AI_RESPONSES.length];
-}
+Guidelines:
+- Give thorough, clinically-informed answers drawing on up-to-date medical knowledge
+- Use clear markdown formatting: **bold** key terms, bullet lists for steps/options, blockquotes for important warnings
+- For symptom questions: describe likely causes (most to least probable), suggest self-care steps, and list red-flag signs that warrant urgent care
+- For medication questions: cover dosing, interactions, side effects, and safer alternatives when relevant
+- For general health questions: provide evidence-based guidance with practical action steps
+- Always include a brief disclaimer reminding users to consult a healthcare provider for diagnosis or treatment decisions
+- For any life-threatening emergency (chest pain, difficulty breathing, stroke signs, severe bleeding, etc.), lead immediately with: "**Call 911 (or your local emergency number) immediately.**"
+- Be warm and reassuring in tone — users are often anxious about their health`;
 
 function generateTitle(content: string): string {
   const words = content.trim().split(/\s+/).slice(0, 6).join(" ");
@@ -224,17 +140,60 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       return;
     }
 
+    // Load full conversation history for context
+    const history = await db
+      .select()
+      .from(messagesTable)
+      .where(eq(messagesTable.conversationId, id))
+      .orderBy(messagesTable.createdAt);
+
+    // Persist user message
     const [userMessage] = await db
       .insert(messagesTable)
       .values({ conversationId: id, role: "user", content: content.trim() })
       .returning();
 
-    const aiContent = nextAIResponse();
+    // Build messages array for OpenAI
+    const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...history.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+      { role: "user", content: content.trim() },
+    ];
+
+    // Stream SSE response
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    let fullResponse = "";
+
+    const stream = await openai.chat.completions.create({
+      model: "gpt-4o",
+      max_completion_tokens: 1024,
+      messages: chatMessages,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content;
+      if (token) {
+        fullResponse += token;
+        res.write(`data: ${JSON.stringify({ content: token })}\n\n`);
+      }
+    }
+
+    // Persist AI message
     const [aiMessage] = await db
       .insert(messagesTable)
-      .values({ conversationId: id, role: "assistant", content: aiContent })
+      .values({ conversationId: id, role: "assistant", content: fullResponse })
       .returning();
 
+    // Update conversation metadata
     const isFirstMessage = conv.lastMessage === null;
     await db
       .update(conversationsTable)
@@ -245,10 +204,19 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       })
       .where(eq(conversationsTable.id, id));
 
-    res.json({ userMessage, aiMessage });
+    // Send completion event with persisted message IDs
+    res.write(
+      `data: ${JSON.stringify({ done: true, userMessage, aiMessage })}\n\n`,
+    );
+    res.end();
   } catch (err) {
     (req as any).log.error({ err }, "send message failed");
-    res.status(500).json({ error: "Failed to send message" });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to send message" });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: "Stream interrupted" })}\n\n`);
+      res.end();
+    }
   }
 });
 

@@ -18,8 +18,6 @@ type ServerMessage = {
   createdAt: string;
 };
 
-const MIN_TYPING_MS = 900;
-
 function toClientMsg(m: ServerMessage): Message {
   return {
     id: m.id,
@@ -104,19 +102,7 @@ export default function ChatPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
 
-  const sendMsg = useMutation({
-    mutationFn: ({ id, content }: { id: string; content: string }) =>
-      apiFetch<{ userMessage: ServerMessage; aiMessage: ServerMessage }>(
-        `/api/conversations/${id}/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
-        },
-      ),
-  });
-
-  // ---------- handlers ----------
+  // ---------- scroll ----------
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -125,6 +111,8 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
+
+  // ---------- streaming send ----------
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -142,39 +130,81 @@ export default function ChatPage() {
         }
       }
 
-      const tempId = `temp-${Date.now()}`;
+      const tempUserId = `temp-user-${Date.now()}`;
+      const tempAiId = `temp-ai-${Date.now()}`;
+
       setMessages((prev) => [
         ...prev,
-        { id: tempId, role: "user", content: trimmed, timestamp: new Date() },
+        { id: tempUserId, role: "user" as const, content: trimmed, timestamp: new Date() },
       ]);
       setInput("");
       setIsTyping(true);
-      const start = Date.now();
 
       try {
-        const { userMessage, aiMessage } = await sendMsg.mutateAsync({
-          id: convId,
-          content: trimmed,
+        const res = await fetch(`/api/conversations/${convId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: trimmed }),
         });
 
-        const elapsed = Date.now() - start;
-        if (elapsed < MIN_TYPING_MS) {
-          await new Promise((r) => setTimeout(r, MIN_TYPING_MS - elapsed));
+        if (!res.ok || !res.body) throw new Error(`API ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let aiContent = "";
+        let hasStartedStreaming = false;
+        let donePayload: { userMessage: ServerMessage; aiMessage: ServerMessage } | null = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const parsed = JSON.parse(line.slice(6));
+
+              if (parsed.content !== undefined) {
+                aiContent += parsed.content;
+                if (!hasStartedStreaming) {
+                  hasStartedStreaming = true;
+                  setIsTyping(false);
+                  setMessages((prev) => [
+                    ...prev,
+                    { id: tempAiId, role: "ai" as const, content: aiContent, timestamp: new Date() },
+                  ]);
+                } else {
+                  setMessages((prev) =>
+                    prev.map((m) => m.id === tempAiId ? { ...m, content: aiContent } : m),
+                  );
+                }
+              }
+
+              if (parsed.done && parsed.userMessage && parsed.aiMessage) {
+                donePayload = parsed as { userMessage: ServerMessage; aiMessage: ServerMessage };
+              }
+            } catch {
+              /* skip malformed SSE lines */
+            }
+          }
         }
 
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== tempId),
-          toClientMsg(userMessage),
-          toClientMsg(aiMessage),
-        ]);
+        if (donePayload) {
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== tempUserId && m.id !== tempAiId),
+            toClientMsg(donePayload!.userMessage),
+            toClientMsg(donePayload!.aiMessage),
+          ]);
+        }
         setIsTyping(false);
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
       } catch {
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserId && m.id !== tempAiId));
         setIsTyping(false);
       }
     },
-    [isTyping, activeConvId, createConv, sendMsg, queryClient],
+    [isTyping, activeConvId, createConv, queryClient],
   );
 
   const handleNewChat = useCallback(() => {

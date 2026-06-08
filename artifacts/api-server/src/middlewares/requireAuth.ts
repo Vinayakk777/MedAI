@@ -7,7 +7,7 @@ export interface AuthRequest extends Request {
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const auth = getAuth(req);
-  const userId = auth?.userId ?? undefined;
+  const userId = (auth?.sessionClaims?.userId as string | undefined) || auth?.userId || undefined;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

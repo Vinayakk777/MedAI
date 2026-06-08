@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, PanelLeftClose, PanelLeftOpen, Sparkles } from "lucide-react";
+import { AlertTriangle, PanelLeftClose, PanelLeftOpen, Sparkles, LayoutDashboard, LogOut } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useUser, useClerk } from "@clerk/react";
 import { ChatSidebar, type ServerConversation } from "@/components/chat/ChatSidebar";
 import { ChatMessage, type Message } from "@/components/chat/ChatMessage";
 import { ChatInput } from "@/components/chat/ChatInput";
@@ -35,6 +37,92 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as T;
+}
+
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+function ChatUserNav() {
+  const { user } = useUser();
+  const { signOut } = useClerk();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const initials =
+    user?.firstName?.[0]?.toUpperCase() ??
+    user?.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() ??
+    "U";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="User menu"
+        className="flex items-center gap-1.5 px-1.5 py-1 rounded-xl hover:bg-white/5 transition-colors"
+      >
+        {user?.imageUrl ? (
+          <img
+            src={user.imageUrl}
+            alt=""
+            className="w-7 h-7 rounded-full object-cover ring-2 ring-primary/30"
+          />
+        ) : (
+          <div className="w-7 h-7 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-primary text-xs font-semibold">
+            {initials}
+          </div>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.96 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 top-full mt-2 w-48 rounded-xl bg-card border border-white/8 shadow-[0_16px_48px_rgba(0,0,0,0.4)] overflow-hidden z-[100]"
+          >
+            <div className="px-3 py-2.5 border-b border-white/5">
+              <p className="text-xs font-semibold text-foreground truncate">
+                {user?.fullName ??
+                  user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ??
+                  "Account"}
+              </p>
+              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                {user?.emailAddresses?.[0]?.emailAddress}
+              </p>
+            </div>
+            <div className="py-1">
+              <Link
+                href="/dashboard"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-white/4 transition-colors"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                Dashboard
+              </Link>
+            </div>
+            <div className="border-t border-white/5 py-1">
+              <button
+                onClick={() => signOut({ redirectUrl: basePath || "/" })}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/8 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign out
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 export default function ChatPage() {
@@ -295,11 +383,12 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/8 border border-primary/15">
               <Sparkles className="w-3 h-3 text-primary" />
               <span className="text-[10px] text-primary font-medium">MedAI v2.0</span>
             </div>
+            <ChatUserNav />
           </div>
         </header>
 

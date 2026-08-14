@@ -103,7 +103,7 @@ export function TrustSection() {
                 Important Medical Disclaimer
               </h4>
               <p className="text-sm text-muted-foreground leading-relaxed max-w-3xl">
-                MedAI provides educational health information and is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the guidance of your physician or qualified healthcare provider with any medical questions. In an emergency, call 911 immediately.
+                MedAI provides educational health information and is not a substitute for professional medical advice, diagnosis, or treatment. Always seek the guidance of your physician or qualified healthcare provider with any medical questions. In an emergency, call 108 immediately.
               </p>
             </div>
           </div>

@@ -3,9 +3,9 @@ import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity, LayoutDashboard, TrendingUp, ShieldAlert,
-  Stethoscope, Pill, FileText, Siren, ArrowLeft,
+  Stethoscope, Pill, FlaskConical, FileText, Siren, ArrowLeft,
   Bell, Sun, Moon, Menu, X, MessageSquare, LogOut, Settings, UserRound,
-  HeartPulse,
+  HeartPulse, Clock, Ambulance, Brain, Target, ShieldCheck,
 } from "lucide-react";
 import { useUser, useClerk } from "@clerk/react";
 import { ProfileModal } from "@/components/profile/ProfileModal";
@@ -14,30 +14,58 @@ import { HealthTrendsChart } from "@/components/dashboard/HealthTrendsChart";
 import { RiskAnalysisChart } from "@/components/dashboard/RiskAnalysisChart";
 import { SymptomCheckerWidget } from "@/components/dashboard/SymptomCheckerWidget";
 import { MedicationLookup } from "@/components/dashboard/MedicationLookup";
-import { HealthReports } from "@/components/dashboard/HealthReports";
+import { LabTestPanel } from "@/components/dashboard/LabTestPanel";
+import { MedicalReportsViewer } from "@/components/dashboard/MedicalReportsViewer";
 import { EmergencySuggestions } from "@/components/dashboard/EmergencySuggestions";
-import { VitalsPanel } from "@/components/dashboard/VitalsPanel";
+import { VitalsDashboard } from "@/components/dashboard/VitalsDashboard";
+import { HealthTimeline } from "@/components/dashboard/HealthTimeline";
+import { MedicalHistoryDashboard } from "@/components/dashboard/MedicalHistoryDashboard";
+import { ReferralCards } from "@/components/dashboard/ReferralCards";
+import { EmergencyWarning } from "@/components/dashboard/EmergencyWarning";
+import { HealthScoreWidget } from "@/components/dashboard/HealthScoreWidget";
+import { SymptomTrendsChart } from "@/components/dashboard/SymptomTrendsChart";
+import { AIHealthInsights } from "@/components/dashboard/AIHealthInsights";
+import { VitalTrendsPanel } from "@/components/dashboard/VitalTrendsPanel";
+import { WellnessGoalsTracker } from "@/components/dashboard/WellnessGoalsTracker";
+import { PreventiveCareReminders } from "@/components/dashboard/PreventiveCareReminders";
+import { DeviceSyncPanel } from "@/components/dashboard/DeviceSyncPanel";
 import { useTheme } from "@/hooks/use-theme";
 
 const NAV_ITEMS = [
-  { id: "overview",   label: "Overview",        icon: LayoutDashboard },
-  { id: "trends",     label: "Health Trends",   icon: TrendingUp       },
-  { id: "vitals",     label: "Vital Signs",     icon: HeartPulse       },
-  { id: "risk",       label: "Risk Analysis",   icon: ShieldAlert      },
-  { id: "symptoms",   label: "Symptom Checker", icon: Stethoscope      },
-  { id: "medications",label: "Medications",     icon: Pill             },
-  { id: "reports",    label: "AI Reports",      icon: FileText         },
-  { id: "emergency",  label: "Emergency Guide", icon: Siren            },
+  { id: "overview",    label: "Overview",        icon: LayoutDashboard },
+  { id: "history",     label: "Medical History", icon: Activity        },
+  { id: "timeline",    label: "Health Timeline", icon: Clock            },
+  { id: "trends",      label: "Health Trends",   icon: TrendingUp       },
+  { id: "vitals",      label: "Vital Signs",     icon: HeartPulse       },
+  { id: "risk",        label: "Risk Analysis",   icon: ShieldAlert      },
+  { id: "symptoms",    label: "Symptom Checker", icon: Stethoscope      },
+  { id: "medications", label: "Medications",     icon: Pill             },
+  { id: "lab-tests",   label: "Lab Tests",       icon: FlaskConical     },
+  { id: "referrals",   label: "Referrals",       icon: Ambulance        },
+  { id: "reports",     label: "AI Reports",      icon: FileText         },
+  { id: "insights",    label: "Health Insights", icon: Brain            },
+  { id: "goals",       label: "Wellness Goals",  icon: Target           },
+  { id: "reminders",   label: "Preventive Care", icon: ShieldCheck      },
+  { id: "vital-trends",label: "Vital Trends",    icon: HeartPulse       },
+  { id: "emergency",   label: "Emergency Guide", icon: Siren            },
 ];
 
 const sectionRefs: Record<string, string> = {
   overview:    "#overview",
+  history:     "#medical-history",
+  timeline:    "#health-timeline",
   trends:      "#trends",
   vitals:      "#vitals",
   risk:        "#risk",
   symptoms:    "#symptom-checker",
   medications: "#medications",
+  "lab-tests": "#lab-tests",
+  referrals:   "#referrals",
   reports:     "#reports",
+  insights:    "#health-insights",
+  goals:       "#wellness-goals",
+  reminders:   "#preventive-care",
+  "vital-trends": "#vital-trends",
   emergency:   "#emergency",
 };
 
@@ -138,6 +166,14 @@ export default function DashboardPage() {
   const [activeSection, setActiveSection] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [emergencyWarning, setEmergencyWarning] = useState<{
+    careLevel: "emergency_today" | "emergency_now";
+    urgencyLabel: string;
+    reason: string;
+    preparationInstructions: string[];
+    whatToBring: string[];
+    whatToTellDoctor: string[];
+  } | null>(null);
   const { theme, toggleTheme } = useTheme();
   const { user } = useUser();
   const mainRef = useRef<HTMLDivElement>(null);
@@ -244,6 +280,12 @@ export default function DashboardPage() {
                     Chat with MedAI
                   </button>
                 </Link>
+                <Link href="/documents">
+                  <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-emerald-400 bg-emerald-500/8 border border-emerald-500/15 hover:bg-emerald-500/12 transition-colors">
+                    <FileText className="w-3.5 h-3.5" />
+                    Document Center
+                  </button>
+                </Link>
               </div>
             </nav>
 
@@ -346,6 +388,18 @@ export default function DashboardPage() {
               <HealthOverviewCards />
             </section>
 
+            {/* Medical History */}
+            <section id="medical-history">
+              <SectionHeader label="Medical History" sub="Your complete health record" />
+              <MedicalHistoryDashboard />
+            </section>
+
+            {/* Health Timeline */}
+            <section id="health-timeline">
+              <SectionHeader label="Health Timeline" sub="All consultations in chronological order" />
+              <HealthTimeline />
+            </section>
+
             {/* Charts row */}
             <section id="trends" className="grid grid-cols-1 xl:grid-cols-3 gap-4">
               <div className="xl:col-span-2">
@@ -356,22 +410,74 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            {/* Vitals + Symptom Checker */}
-            <section id="vitals" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <VitalsPanel />
+            {/* Vitals Dashboard */}
+            <section id="vitals">
+              <VitalsDashboard />
+            </section>
+
+            {/* Symptom Checker + Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div id="symptom-checker">
                 <SymptomCheckerWidget />
               </div>
-            </section>
+              <div>
+                <HealthTrendsChart />
+              </div>
+            </div>
 
             {/* Medications */}
             <section id="medications">
               <MedicationLookup />
             </section>
 
+            {/* Lab Tests */}
+            <section id="lab-tests">
+              <LabTestPanel />
+            </section>
+
+            {/* Referrals */}
+            <section id="referrals">
+              <SectionHeader label="Care Referrals" sub="Doctor handoff summaries and care level recommendations" />
+              <ReferralCards />
+            </section>
+
             {/* AI Reports */}
             <section id="reports">
-              <HealthReports />
+              <MedicalReportsViewer />
+            </section>
+
+            {/* AI Health Insights */}
+            <section id="health-insights">
+              <SectionHeader label="AI Health Insights" sub="Longitudinal analysis and personalized wellness recommendations" />
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <HealthScoreWidget />
+                </div>
+                <div className="lg:col-span-2">
+                  <AIHealthInsights />
+                </div>
+              </div>
+              <SymptomTrendsChart />
+            </section>
+
+            {/* Vital Trends */}
+            <section id="vital-trends" className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-2">
+                <VitalTrendsPanel />
+              </div>
+              <div>
+                <DeviceSyncPanel />
+              </div>
+            </section>
+
+            {/* Wellness Goals */}
+            <section id="wellness-goals">
+              <WellnessGoalsTracker />
+            </section>
+
+            {/* Preventive Care */}
+            <section id="preventive-care">
+              <PreventiveCareReminders />
             </section>
 
             {/* Emergency */}
@@ -382,6 +488,19 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Emergency Warning Overlay */}
+      {emergencyWarning && (
+        <EmergencyWarning
+          careLevel={emergencyWarning.careLevel}
+          urgencyLabel={emergencyWarning.urgencyLabel}
+          reason={emergencyWarning.reason}
+          preparationInstructions={emergencyWarning.preparationInstructions}
+          whatToBring={emergencyWarning.whatToBring}
+          whatToTellDoctor={emergencyWarning.whatToTellDoctor}
+          onDismiss={() => setEmergencyWarning(null)}
+        />
+      )}
     </div>
   );
 }

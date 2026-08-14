@@ -1,27 +1,102 @@
 import { Router, type IRouter } from "express";
 import OpenAI from "openai";
+import path from "path";
+import fs from "fs";
 import { db } from "@workspace/db";
-import { conversationsTable, messagesTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import {
+  conversationsTable,
+  messagesTable,
+  safetyEvaluationsTable,
+  chatAttachmentsTable,
+  type ChatAttachment,
+  type MessageAttachment,
+} from "@workspace/db";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
+import { IMAGE_ANALYSIS_SYSTEM_PROMPT } from "../lib/imageGuidance";
+import { analyzeSymptoms } from "../lib/symptomEngine";
+import { generateAssessment } from "../lib/assessmentEngine";
+import { generateFollowUpQuestions } from "../lib/followUpEngine";
+import { validateAssessment } from "../lib/validationEngine";
+import { assessConfidence } from "../lib/confidenceEngine";
+import { evaluateEscalation } from "../lib/escalationEngine";
+import { generateClinicalSummary } from "../lib/summaryEngine";
+import { generateSelfCarePlan } from "../lib/selfCareEngine";
+import { generateOTCGuidance } from "../lib/otcEngine";
+import { generateRemedyPlan } from "../lib/remedyEngine";
+import { generateRecoveryPlan } from "../lib/recoveryEngine";
+import { generatePreventionPlan } from "../lib/preventionEngine";
+import { calculateHealthRiskScore } from "../lib/riskEngine";
+import { generateCareRecommendation } from "../lib/triageEngine";
+import { recommendLabTests } from "../lib/labEngine";
+import { generateReport, generateReportSummary } from "../lib/reportEngine";
+import { healthReportsTable } from "@workspace/db";
+import {
+  extractMedicalMemory,
+  saveMedicalMemory,
+  getRelevantMemories,
+  formatMemoriesForPrompt,
+} from "../lib/memoryEngine";
+import { getRagEngine } from "../lib/rag/ragEngine";
+import {
+  createInitialState,
+  buildSystemPrompt,
+  getEffectiveDDx,
+  type ConsultationState,
+} from "../lib/orchestrator";
+import { SafetyFramework } from "../lib/safety/framework";
+import { AnalyticsCollector } from "../lib/observability/analyticsCollector";
+import { ProviderComparator } from "../lib/observability/providerComparator";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const groq = process.env.GROQ_API_KEY
+  ? new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: "https://api.groq.com/openai/v1" })
+  : null;
 
-const SYSTEM_PROMPT = `You are MedAI, a knowledgeable and empathetic AI medical assistant. You provide accurate, evidence-based health guidance to help people understand their symptoms, medications, and health conditions.
+const CHAT_MODEL = "llama-3.3-70b-versatile";
+const VISION_MODEL = "qwen/qwen3.6-27b";
 
-Guidelines:
-- Give thorough, clinically-informed answers drawing on up-to-date medical knowledge
-- Use clear markdown formatting: **bold** key terms, bullet lists for steps/options, blockquotes for important warnings
-- For symptom questions: describe likely causes (most to least probable), suggest self-care steps, and list red-flag signs that warrant urgent care
-- For medication questions: cover dosing, interactions, side effects, and safer alternatives when relevant
-- For general health questions: provide evidence-based guidance with practical action steps
-- Always include a brief disclaimer reminding users to consult a healthcare provider for diagnosis or treatment decisions
-- For any life-threatening emergency (chest pain, difficulty breathing, stroke signs, severe bleeding, etc.), lead immediately with: "**Call 911 (or your local emergency number) immediately.**"
-- Be warm and reassuring in tone — users are often anxious about their health`;
+const MAX_ATTACHMENTS_PER_MESSAGE = 6;
+const chatImageDir = path.join(process.cwd(), "uploads", "chat-images");
 
 function generateTitle(content: string): string {
   const words = content.trim().split(/\s+/).slice(0, 6).join(" ");
   return words.length < content.trim().length ? `${words}…` : words;
+}
+
+type VisionPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+function loadImageParts(attachments: ChatAttachment[]): VisionPart[] {
+  const parts: VisionPart[] = [];
+  for (const att of attachments) {
+    try {
+      const filePath = path.join(chatImageDir, att.storageKey);
+      if (!fs.existsSync(filePath)) continue;
+      const buf = fs.readFileSync(filePath);
+      if (buf.length === 0) continue;
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${att.mimeType};base64,${buf.toString("base64")}` },
+      });
+    } catch (err) {
+      console.error("[conversations] failed to load image for prompt:", err);
+    }
+  }
+  return parts;
+}
+
+function toMessageAttachment(att: ChatAttachment): MessageAttachment {
+  return {
+    id: att.id,
+    type: "image",
+    url: `/api/images/${att.id}`,
+    mimeType: att.mimeType,
+    name: att.name,
+    size: att.size ?? undefined,
+    width: att.width ?? undefined,
+    height: att.height ?? undefined,
+  };
 }
 
 const router: IRouter = Router();
@@ -123,12 +198,47 @@ router.patch("/conversations/:id", requireAuth, async (req, res) => {
 router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   const id = req.params.id as string;
-  const { content } = req.body as { content: string };
+  const body = (req.body ?? {}) as {
+    content?: string;
+    attachments?: { id: string }[] | string[];
+  };
+  const content = (body.content ?? "").trim();
+  const attachmentIds = (
+    Array.isArray(body.attachments)
+      ? body.attachments
+          .map((a) => (typeof a === "string" ? a : a?.id))
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+      : []
+  ).slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
 
-  if (!content?.trim()) {
-    res.status(400).json({ error: "content is required" });
+  if (!content && attachmentIds.length === 0) {
+    res.status(400).json({ error: "message content or an attachment is required" });
     return;
   }
+  if (!groq) {
+
+    res.status(503).json({ error: "GROQ_API_KEY not configured" });
+    return;
+  }
+
+  // Validate attachment ownership BEFORE any AI work runs.
+  let userAttachments: ChatAttachment[] = [];
+  if (attachmentIds.length > 0) {
+    userAttachments = await db
+      .select()
+      .from(chatAttachmentsTable)
+      .where(
+        and(
+          inArray(chatAttachmentsTable.id, attachmentIds),
+          eq(chatAttachmentsTable.userId, userId),
+        ),
+      );
+    if (userAttachments.length !== attachmentIds.length) {
+      res.status(400).json({ error: "One or more attachments are invalid or unauthorized" });
+      return;
+    }
+  }
+  const hasImages = userAttachments.length > 0;
 
   try {
     const [conv] = await db
@@ -150,18 +260,73 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     // Persist user message
     const [userMessage] = await db
       .insert(messagesTable)
-      .values({ conversationId: id, role: "user", content: content.trim() })
+      .values({
+        conversationId: id,
+        role: "user",
+        content: content || (hasImages ? "Sent an image" : ""),
+        attachments: hasImages ? userAttachments.map(toMessageAttachment) : [],
+      })
       .returning();
 
-    // Build messages array for OpenAI
-    const chatMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...history.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      { role: "user", content: content.trim() },
-    ];
+    // Link attachments to this message + conversation (ownership already verified).
+    if (hasImages) {
+      await db
+        .update(chatAttachmentsTable)
+        .set({ messageId: userMessage.id, conversationId: id })
+        .where(inArray(chatAttachmentsTable.id, attachmentIds));
+    }
+
+    // Initialize orchestration state
+    const state: ConsultationState = createInitialState(
+      content || (hasImages ? "[Image message]" : ""),
+      history.map((m) => ({ role: m.role, content: m.content })),
+    );
+
+    // ── Pipeline: Step 1 — Symptom Analysis ──
+    if (content) {
+      try {
+        state.symptomAnalysis = await analyzeSymptoms(
+          history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+          content,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[conversations] symptom analysis failed:", msg);
+      }
+    } else {
+      state.symptomAnalysis = null;
+    }
+
+    // ── Pipeline: Step 2 — Escalation Engine ──
+    if (state.symptomAnalysis && state.symptomAnalysis.allSymptoms.length > 0) {
+      try {
+        state.escalation = await evaluateEscalation(
+          state.symptomAnalysis,
+          history.map((m) => ({ role: m.role, content: m.content })),
+          content,
+        );
+        if (state.escalation) {
+          console.log(`[conversations] escalation: ${state.escalation.escalationLevel} (${state.escalation.redFlags.length} red flags)`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[conversations] escalation evaluation failed:", msg);
+      }
+    }
+
+    // Determine effective emergency state
+    const isEmergency = state.escalation?.isEmergency ?? state.symptomAnalysis?.isEmergency ?? false;
+    const hasRedFlags = (state.escalation?.redFlags.length ?? state.symptomAnalysis?.emergencyFlags.length ?? 0) > 0;
+
+    // Build unified system prompt from state (symptom analysis + escalation + history).
+    // NOTE: We stream the response FIRST and run the remaining enrichment engines
+    // (assessment, validation, confidence, self-care, OTC, remedies, recovery,
+    // prevention, risk, triage, lab tests, memory, RAG) in the background AFTER the
+    // stream completes. This keeps time-to-first-token fast instead of waiting for a
+    // long chain of LLM calls that can be throttled by provider rate limits.
+    const systemContent =
+      buildSystemPrompt(state) +
+      (hasImages ? `\n\n${IMAGE_ANALYSIS_SYSTEM_PROMPT}` : "");
 
     // Stream SSE response
     res.setHeader("Content-Type", "text/event-stream");
@@ -172,43 +337,497 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
 
     let fullResponse = "";
 
-    const stream = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_completion_tokens: 1024,
-      messages: chatMessages,
-      stream: true,
-    });
+    const historyForModel = history.map((m) => ({
+      role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
+      content: m.content,
+    }));
+
+    let userContent: string | VisionPart[];
+    if (hasImages) {
+      const parts: VisionPart[] = [];
+      if (content) parts.push({ type: "text", text: content });
+      parts.push(...loadImageParts(userAttachments));
+      userContent = parts.length > 0 ? parts : [{ type: "text", text: "[Image message]" }];
+    } else {
+      userContent = content;
+    }
+
+    const streamController = new AbortController();
+    const streamTimeout = setTimeout(() => streamController.abort(), 60_000);
+
+    let stream;
+    try {
+      stream = await groq.chat.completions.create({
+        model: hasImages ? VISION_MODEL : CHAT_MODEL,
+        messages: [
+          { role: "system", content: systemContent },
+          ...historyForModel,
+          { role: "user", content: userContent },
+        ],
+        stream: true,
+        ...(hasImages ? { reasoning_effort: "none" as never } : {}),
+      }, { signal: streamController.signal });
+    } catch (err) {
+      clearTimeout(streamTimeout);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[conversations] OpenAI streaming call failed:", msg);
+      // Roll back the persisted user message so a retry does not duplicate it.
+      try {
+        await db.delete(messagesTable).where(eq(messagesTable.id, userMessage.id));
+        if (hasImages) {
+          await db
+            .update(chatAttachmentsTable)
+            .set({ messageId: null, conversationId: null })
+            .where(inArray(chatAttachmentsTable.id, attachmentIds));
+        }
+      } catch {
+        // best-effort rollback
+      }
+      res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+      res.end();
+      return;
+    }
+
+    clearTimeout(streamTimeout);
 
     for await (const chunk of stream) {
-      const token = chunk.choices[0]?.delta?.content;
-      if (token) {
-        fullResponse += token;
-        res.write(`data: ${JSON.stringify({ content: token })}\n\n`);
+      const text = chunk.choices[0]?.delta?.content || "";
+      if (text) {
+        fullResponse += text;
+        res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
       }
     }
 
-    // Persist AI message
+    state.finalResponse = fullResponse;
+
+    // ── Safety & Guardrails Evaluation ──
+    try {
+      const safetyFramework = new SafetyFramework();
+      const safetyResult = await safetyFramework.evaluate(fullResponse, {
+        userId,
+        conversationId: id,
+        queryText: content,
+      });
+
+      if (safetyResult.action === "block" && safetyResult.fallbackMessage) {
+        fullResponse = safetyResult.fallbackMessage;
+        state.finalResponse = fullResponse;
+      }
+
+      // Persist safety evaluation
+      await db.insert(safetyEvaluationsTable).values({
+        userId,
+        conversationId: id,
+        responseText: fullResponse,
+        queryText: content,
+        overallStatus: safetyResult.overallStatus,
+        action: safetyResult.action,
+        fallbackMessage: safetyResult.fallbackMessage,
+        originalResponse: safetyResult.originalResponse,
+        passedCount: safetyResult.results.filter((r) => r.status === "passed").length,
+        warningCount: safetyResult.results.filter((r) => r.status === "warning").length,
+        failedCount: safetyResult.results.filter((r) => r.status === "failed").length,
+        qualityScore: safetyResult.scores.qualityScore,
+        hallucinationScore: safetyResult.scores.hallucinationScore,
+        confidenceScore: safetyResult.scores.confidenceScore,
+        clinicalRiskScore: safetyResult.scores.clinicalRiskScore,
+        latencyMs: safetyResult.latencyMs,
+      }).execute();
+    } catch (safetyErr) {
+      console.error("[safety] evaluation failed:", safetyErr);
+    }
+
+    // ── Persist AI message ──
     const [aiMessage] = await db
       .insert(messagesTable)
       .values({ conversationId: id, role: "assistant", content: fullResponse })
       .returning();
 
-    // Update conversation metadata
+    // ── Update conversation metadata ──
+    const lastMsgText = content || "Sent an image";
     const isFirstMessage = conv.lastMessage === null;
     await db
       .update(conversationsTable)
       .set({
-        lastMessage: content.trim().slice(0, 100),
+        lastMessage: lastMsgText.slice(0, 100),
         updatedAt: new Date(),
-        ...(isFirstMessage ? { title: generateTitle(content.trim()) } : {}),
+        ...(isFirstMessage ? { title: generateTitle(lastMsgText) } : {}),
       })
       .where(eq(conversationsTable.id, id));
 
-    // Send completion event with persisted message IDs
+    // Send completion event immediately so the client renders the response fast.
     res.write(
       `data: ${JSON.stringify({ done: true, userMessage, aiMessage })}\n\n`,
     );
     res.end();
+
+    // ── Background enrichment pipeline (fire-and-forget) ──
+    // The enrichment engines below each make a separate LLM call. Running them
+    // sequentially BEFORE streaming caused time-to-first-token to balloon (provider
+    // rate limits throttle the chain of calls). They are now executed after the
+    // response is delivered; they update memory, reports, summaries and lab tests.
+    void (async () => {
+      try {
+        // ── Pipeline: Step 3 — Route (follow-up or DDx) ──
+        if (state.symptomAnalysis && !isEmergency && !hasRedFlags) {
+          if (state.symptomAnalysis.assessmentReady) {
+            // Step 4 — Differential Diagnosis
+            try {
+              state.differentialDiagnosis = await generateAssessment(
+                state.symptomAnalysis,
+                history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+                content.trim(),
+              );
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error("[conversations] assessment generation failed:", msg);
+            }
+
+            // Step 5 — Medical Knowledge Validation
+            if (state.differentialDiagnosis) {
+              try {
+                state.validation = await validateAssessment(state.differentialDiagnosis, state.symptomAnalysis);
+                if (state.validation && state.validation.issues.length > 0) {
+                  console.log("[conversations] validation issues:", state.validation.issues.length);
+                }
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error("[conversations] validation failed:", msg);
+              }
+            }
+
+            // Step 6 — Confidence & Uncertainty Evaluation
+            const ddxForConfidence = getEffectiveDDx(state);
+            if (ddxForConfidence) {
+              try {
+                state.confidence = await assessConfidence(
+                  state.symptomAnalysis,
+                  ddxForConfidence,
+                  state.validation,
+                  history.map((m) => ({ role: m.role, content: m.content })),
+                );
+                if (state.confidence) {
+                  console.log(`[conversations] confidence score: ${state.confidence.confidenceScore} (${state.confidence.overallConfidence})`);
+                }
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error("[conversations] confidence assessment failed:", msg);
+              }
+            }
+          } else if (state.symptomAnalysis.allSymptoms.length > 0) {
+            // Step 3b — Follow-up Question Engine
+            try {
+              state.followUp = await generateFollowUpQuestions(
+                state.symptomAnalysis,
+                history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+                content.trim(),
+              );
+              if (state.followUp && state.followUp.questions.length > 0) {
+                console.log(`[conversations] follow-up: ${state.followUp.questions.length} questions`);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error("[conversations] follow-up generation failed:", msg);
+            }
+          }
+        }
+
+        // ── Pipeline: Step 7 — Self-Care Guidance Engine ──
+        if (state.symptomAnalysis && state.differentialDiagnosis && !isEmergency && !hasRedFlags) {
+          try {
+            const ddx = getEffectiveDDx(state);
+            state.selfCare = await generateSelfCarePlan(
+              state.symptomAnalysis,
+              ddx,
+              state.confidence?.confidenceScore ?? null,
+            );
+            if (state.selfCare) {
+              console.log(`[conversations] self-care: ${state.selfCare.recommendations.length} recommendations`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] self-care generation failed:", msg);
+          }
+
+          // Step 8 — OTC Medication Guidance Engine
+          try {
+            const ddx = getEffectiveDDx(state);
+            state.otcGuidance = await generateOTCGuidance(
+              state.symptomAnalysis,
+              ddx,
+              state.confidence?.confidenceScore ?? null,
+            );
+            if (state.otcGuidance) {
+              console.log(`[conversations] OTC guidance: ${state.otcGuidance.recommendations.length} medications`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] OTC guidance generation failed:", msg);
+          }
+
+          // Step 9 — Home Remedies & Traditional Wellness Engine
+          try {
+            const emergencyLevel = state.escalation?.escalationLevel === "emergency";
+            state.remedyPlan = await generateRemedyPlan(
+              state.symptomAnalysis,
+              getEffectiveDDx(state),
+              emergencyLevel,
+            );
+            if (state.remedyPlan && state.remedyPlan.homeRemedies.length > 0) {
+              console.log(`[conversations] Remedy plan: ${state.remedyPlan.homeRemedies.length} remedies, ${state.remedyPlan.traditionalWellness.length} traditional`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] Remedy plan generation failed:", msg);
+          }
+
+          // Step 10 — Recovery Timeline & Monitoring Engine
+          try {
+            state.recoveryPlan = await generateRecoveryPlan(
+              state.symptomAnalysis,
+              getEffectiveDDx(state),
+              state.confidence,
+              state.escalation,
+            );
+            if (state.recoveryPlan && state.recoveryPlan.recoveryTimelines.length > 0) {
+              console.log(`[conversations] Recovery plan: ${state.recoveryPlan.recoveryTimelines.length} timelines, status: ${state.recoveryPlan.recoveryStatus}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] Recovery plan generation failed:", msg);
+          }
+
+          // Step 11 — Prevention & Lifestyle Engine
+          try {
+            const emergencyLevel = state.escalation?.escalationLevel === "emergency";
+            state.preventionPlan = await generatePreventionPlan(
+              state.symptomAnalysis,
+              getEffectiveDDx(state),
+              state.symptomAnalysis.clinicalProfile ?? null,
+              emergencyLevel,
+            );
+            if (state.preventionPlan && state.preventionPlan.wellnessTips.length > 0) {
+              console.log(`[conversations] Prevention: ${state.preventionPlan.wellnessTips.length} tips, ${state.preventionPlan.healthEducation.length} education items`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] Prevention plan generation failed:", msg);
+          }
+        }
+
+        // ── Pipeline: Step 12 — Health Risk Scoring Engine ──
+        if (state.symptomAnalysis) {
+          try {
+            state.healthRiskScore = await calculateHealthRiskScore(
+              state.symptomAnalysis,
+              getEffectiveDDx(state),
+              state.confidence,
+              state.escalation,
+            );
+            if (state.healthRiskScore) {
+              console.log(`[conversations] Health risk score: ${state.healthRiskScore.overallScore} (${state.healthRiskScore.riskCategory})`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] Health risk score generation failed:", msg);
+          }
+        }
+
+        // ── Pipeline: Step 13 — Care Recommendation & Triage Engine ──
+        if (state.symptomAnalysis) {
+          try {
+            state.careRecommendation = await generateCareRecommendation(
+              state.symptomAnalysis,
+              getEffectiveDDx(state),
+              state.confidence,
+              state.escalation,
+              state.healthRiskScore,
+            );
+            if (state.careRecommendation) {
+              console.log(`[conversations] Care recommendation: ${state.careRecommendation.careRecommendation} (escalation: ${state.careRecommendation.escalationRequired})`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] Care recommendation generation failed:", msg);
+          }
+        }
+
+        // ── Pipeline: Step 14 — Laboratory Test Recommendation Engine ──
+        if (state.symptomAnalysis && !isEmergency && state.differentialDiagnosis) {
+          try {
+            state.laboratoryTests = await recommendLabTests(
+              state.symptomAnalysis,
+              getEffectiveDDx(state),
+              state.confidence,
+              state.escalation,
+              state.healthRiskScore,
+            );
+            if (state.laboratoryTests) {
+              const n = state.laboratoryTests.recommendedTests.length;
+              console.log(`[conversations] lab tests: ${n > 0 ? `${n} recommended` : "no tests needed"}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] lab test recommendation failed:", msg);
+          }
+        }
+
+        // ── Pipeline: Step 15a — Retrieve & inject relevant medical memories ──
+        try {
+          const currentSymptoms = state.symptomAnalysis?.allSymptoms.map(s => s.normalized) ?? [];
+          const currentDiagnoses = getEffectiveDDx(state)?.conditions.map(c => c.name) ?? [];
+          const relevant = await getRelevantMemories(userId, currentSymptoms, currentDiagnoses);
+          if (relevant.length > 0) {
+            state.relevantMemories = formatMemoriesForPrompt(relevant);
+            state.userId = userId;
+            console.log(`[conversations] injected ${relevant.length} relevant memories`);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[conversations] memory retrieval failed:", msg);
+        }
+
+        // ── Pipeline: Step 15b — RAG medical evidence retrieval ──
+        if (!isEmergency) {
+          try {
+            const ragEngine = getRagEngine();
+            const queryText = [
+              state.symptomAnalysis?.primarySymptom?.normalized,
+              state.symptomAnalysis?.clinicalProfile,
+              ...(state.symptomAnalysis?.allSymptoms.map(s => s.normalized) ?? []),
+              ...(state.differentialDiagnosis?.conditions.map(c => c.name) ?? []),
+            ].filter(Boolean).join(" ").trim();
+
+            if (queryText.length > 10) {
+              const { evidenceBlock } = await ragEngine.formatEvidenceForPrompt({
+                text: queryText,
+                userId,
+                pipelineStage: "diagnosis",
+                useCache: true,
+              });
+              state.ragEvidence = evidenceBlock;
+              console.log(`[conversations] RAG evidence injected (query: ${queryText.slice(0, 60)}...)`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] RAG evidence retrieval failed:", msg);
+          }
+        }
+
+        // ── Post-stream: Save Lab Test Recommendations ──
+        if (state.laboratoryTests) {
+          try {
+            await db
+              .update(conversationsTable)
+              .set({ laboratoryTests: state.laboratoryTests } as any)
+              .where(eq(conversationsTable.id, id));
+            console.log("[conversations] lab tests saved");
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] lab tests save failed:", msg);
+          }
+        }
+
+        // ── Personalized Clinical Summary ──
+        if (state.symptomAnalysis && aiMessage) {
+          try {
+            const ddx = getEffectiveDDx(state);
+            state.clinicalSummary = await generateClinicalSummary(
+              state.symptomAnalysis,
+              ddx,
+              state.validation,
+              state.confidence,
+              history.map((m) => ({ role: m.role, content: m.content })),
+              content.trim(),
+            );
+            if (state.clinicalSummary) {
+              await db
+                .update(conversationsTable)
+                .set({ clinicalSummary: state.clinicalSummary } as any)
+                .where(eq(conversationsTable.id, id));
+              console.log("[conversations] clinical summary saved");
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] summary generation failed:", msg);
+          }
+        }
+
+        // ── Save medical memory ──
+        if (state.symptomAnalysis) {
+          try {
+            const memory = extractMedicalMemory(state, userId, id);
+            await saveMedicalMemory(userId, id, memory);
+            console.log("[conversations] medical memory saved");
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] memory save failed:", msg);
+          }
+        }
+
+        // ── Auto-generate Medical Report ──
+        if (state.symptomAnalysis) {
+          try {
+            const report = generateReport(state, conv.createdAt.toISOString());
+            report.reportId = id;
+            const reportSummary = generateReportSummary(report);
+            await db
+              .insert(healthReportsTable)
+              .values({
+                userId,
+                conversationId: id,
+                title: `Consultation Report - ${new Date().toLocaleDateString()}`,
+                summary: reportSummary,
+                score: report.riskAssessment.overallScore || null,
+                highlights: report.differentialDiagnoses.slice(0, 3).map(d => `${d.condition} (${d.confidence}%)`),
+                reportData: report as any,
+              })
+              .onConflictDoNothing();
+            console.log("[conversations] medical report auto-generated");
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("[conversations] report generation failed:", msg);
+          }
+        }
+
+        // ── Observability: Record consultation analytics ──
+        try {
+          const obsAnalytics = new AnalyticsCollector();
+          await obsAnalytics.recordTelemetry({
+            conversationId: id,
+            userId,
+            durationMs: Date.now() - conv.createdAt.getTime(),
+            followUpCount: state.symptomAnalysis?.followUpQuestions?.length ?? 0,
+            tokensInput: 0,
+            tokensOutput: fullResponse.split(/\s+/).length * 2,
+            llmProvider: "groq",
+            llmModel: hasImages ? VISION_MODEL : CHAT_MODEL,
+            responseLatencyMs: 0,
+            safetyInterventions: 0,
+            confidenceScore: state.confidence?.confidenceScore ?? undefined,
+            finalRiskCategory: state.healthRiskScore?.riskCategory ?? undefined,
+            recommendationCategory: state.careRecommendation?.careRecommendation ?? undefined,
+            hadEscalation: state.escalation?.isEmergency ?? false,
+            hadFallback: false,
+          });
+
+          const providerComparator = new ProviderComparator();
+          await providerComparator.recordCall({
+            provider: "groq",
+            model: hasImages ? VISION_MODEL : CHAT_MODEL,
+            taskType: "generation",
+            latencyMs: 0,
+            tokensInput: 0,
+            tokensOutput: fullResponse.split(/\s+/).length * 2,
+            success: true,
+          });
+        } catch (obsErr) {
+          console.error("[observability] recording failed:", obsErr);
+        }
+      } catch (err) {
+        (req as any).log.error({ err }, "background enrichment failed");
+      }
+    })();
   } catch (err) {
     (req as any).log.error({ err }, "send message failed");
     if (!res.headersSent) {

@@ -3,13 +3,13 @@ import { Siren, Phone, ChevronRight, ShieldCheck } from "lucide-react";
 
 const emergencies = [
   {
-    severity: "CALL 911",
+    severity: "CALL 108",
     color: "text-rose-400",
     bg: "bg-rose-500/8",
     border: "border-rose-500/20",
     dot: "bg-rose-500",
     symptoms: ["Chest pain or pressure", "Difficulty breathing", "Sudden numbness or weakness", "Severe allergic reaction (anaphylaxis)", "Uncontrolled bleeding"],
-    action: "Call 911 immediately",
+    action: "Call 108 immediately",
   },
   {
     severity: "URGENT CARE",
@@ -46,12 +46,12 @@ export function EmergencySuggestions() {
           <h3 className="text-sm font-semibold text-foreground">Emergency Guide</h3>
         </div>
         <a
-          href="tel:911"
+          href="tel:108"
           data-testid="link-call-911"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold hover:bg-rose-500/15 transition-colors"
         >
           <Phone className="w-3.5 h-3.5" />
-          Call 911
+          Call 108
         </a>
       </div>
       <p className="text-xs text-muted-foreground mb-5">Know when to escalate — act fast when it matters</p>
@@ -89,7 +89,7 @@ export function EmergencySuggestions() {
       <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
         <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
         <p className="text-[11px] text-muted-foreground leading-relaxed">
-          <strong className="text-foreground/70">Medical Disclaimer:</strong> This guide is for informational purposes only. MedAI does not provide emergency medical advice. Always trust your instincts — when in doubt, call 911 or go to your nearest emergency room.
+          <strong className="text-foreground/70">Medical Disclaimer:</strong> This guide is for informational purposes only. MedAI does not provide emergency medical advice. Always trust your instincts — when in doubt, call 108 or go to your nearest emergency room.
         </p>
       </div>
     </motion.div>

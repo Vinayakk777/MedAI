@@ -18,6 +18,9 @@ const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
 const SignInPage    = lazy(() => import("@/pages/SignInPage"));
 const SignUpPage    = lazy(() => import("@/pages/SignUpPage"));
 const NotFound      = lazy(() => import("@/pages/not-found"));
+const ClinicianPortalPage = lazy(() => import("@/pages/ClinicianPortalPage"));
+const DocumentsPage = lazy(() => import("@/pages/DocumentsPage"));
+const RagAdminPage = lazy(() => import("@/pages/RagAdminPage"));
 
 // REQUIRED — resolves key from hostname for multi-domain / custom-domain support
 const clerkPubKey = publishableKeyFromHost(
@@ -184,6 +187,9 @@ function AnimatedRouter() {
         <Route path="/chat" component={ProtectedChat} />
         <Route path="/dashboard" component={ProtectedDashboard} />
         <Route path="/about" component={AboutPage} />
+        <Route path="/clinician/*?" component={ClinicianPortalPage} />
+        <Route path="/documents" component={DocumentsPage} />
+        <Route path="/rag-admin" component={RagAdminPage} />
         <Route component={NotFound} />
       </Switch>
     </AnimatePresence>

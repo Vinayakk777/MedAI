@@ -123,8 +123,8 @@ export function ChatSidebar({
   onRename,
 }: ChatSidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const filtered = conversations.filter(
     (c) =>
@@ -197,8 +197,6 @@ export function ChatSidebar({
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.2 }}
                           className="relative group/item"
-                          onMouseEnter={() => setHoveredId(item.id)}
-                          onMouseLeave={() => setHoveredId(null)}
                         >
                           <button
                             onClick={() => !isRenaming && onSelect(item.id)}
@@ -209,14 +207,14 @@ export function ChatSidebar({
                                 : "text-muted-foreground hover:bg-white/4 hover:text-foreground"
                             }`}
                           >
-                            <div className="flex items-start gap-2.5 min-w-0">
+                            <div className="flex items-start gap-2.5 min-w-0 pr-24">
                               <MessageSquare
                                 className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${
                                   isActive ? "text-primary" : "text-muted-foreground/40"
                                 }`}
                               />
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center justify-between gap-1">
+                                <div className="flex items-center gap-1">
                                   {isRenaming ? (
                                     <RenameInput
                                       initialValue={item.title}
@@ -228,7 +226,10 @@ export function ChatSidebar({
                                     />
                                   ) : (
                                     <>
-                                      <span className="text-xs font-medium truncate">
+                                      <span
+                                        className="text-xs font-medium truncate flex-1 min-w-0 leading-[1.5]"
+                                        title={item.title}
+                                      >
                                         {item.title}
                                       </span>
                                       <span className="text-[10px] text-muted-foreground/30 flex-shrink-0">
@@ -246,40 +247,68 @@ export function ChatSidebar({
                             </div>
                           </button>
 
-                          {/* Hover actions */}
-                          <AnimatePresence>
-                            {hoveredId === item.id && !isRenaming && (
-                              <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5"
-                              >
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setRenamingId(item.id);
-                                  }}
-                                  className="p-1 rounded-md text-muted-foreground/30 hover:text-primary hover:bg-primary/10 transition-colors"
-                                  aria-label="Rename conversation"
-                                  data-testid={`button-rename-${item.id}`}
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete(item.id);
-                                  }}
-                                  className="p-1 rounded-md text-muted-foreground/30 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                                  aria-label="Delete conversation"
-                                  data-testid={`button-delete-${item.id}`}
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                          {/* Item actions — always rendered so they work on touch & hover */}
+                          {!isRenaming && (
+                            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                              {confirmDeleteId === item.id ? (
+                                <div className="flex items-center gap-1 rounded-lg border border-rose-500/40 bg-black/80 px-2 py-1 shadow-xl">
+                                  <span className="text-[10px] font-semibold text-rose-400 whitespace-nowrap">Delete?</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmDeleteId(null);
+                                      onDelete(item.id);
+                                    }}
+                                    className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-white bg-rose-500 hover:bg-rose-400 transition-colors"
+                                    aria-label="Confirm delete"
+                                    data-testid={`button-confirm-delete-${item.id}`}
+                                  >
+                                    Yes
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmDeleteId(null);
+                                    }}
+                                    className="px-1.5 py-0.5 rounded-md text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                    aria-label="Cancel delete"
+                                    data-testid={`button-cancel-delete-${item.id}`}
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRenamingId(item.id);
+                                      setConfirmDeleteId(null);
+                                    }}
+                                    className="p-1.5 rounded-md text-muted-foreground/70 hover:text-primary hover:bg-primary/10 transition-colors"
+                                    aria-label={`Rename ${item.title}`}
+                                    data-testid={`button-rename-${item.id}`}
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRenamingId("");
+                                      setConfirmDeleteId(item.id);
+                                    }}
+                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-semibold text-rose-400/90 bg-rose-500/10 border border-rose-500/25 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
+                                    aria-label={`Delete ${item.title}`}
+                                    title="Delete conversation"
+                                    data-testid={`button-delete-${item.id}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span className="hidden md:inline">Delete</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </motion.div>
                       );
                     })}

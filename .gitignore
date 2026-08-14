@@ -41,6 +41,17 @@ testem.log
 .DS_Store
 Thumbs.db
 
+# secrets & runtime
+.env
+.env.local
+.env.*.local
+*.log
+uploads/
+start_dev.ps1
+start_servers.cmd
+start_wmi.ps1
+wmic_start.ps1
+
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 

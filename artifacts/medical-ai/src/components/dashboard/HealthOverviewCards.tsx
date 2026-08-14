@@ -1,6 +1,66 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import { Heart, ShieldAlert, Pill, CalendarCheck, TrendingUp, TrendingDown, Minus } from "lucide-react";
+
+type OverviewData = {
+  healthScore: number;
+  activeAlerts: number;
+  activeMedications: number;
+  checkIns: number;
+  reportCount: number;
+};
+
+const cardConfigs = [
+  {
+    key: "healthScore" as const,
+    label: "Health Score",
+    suffix: "/100",
+    changeKey: null,
+    changeLabel: "Latest from health reports",
+    icon: Heart,
+    color: "text-cyan-400",
+    bg: "from-cyan-500/8 to-transparent",
+    border: "rgba(6,182,212,0.2)",
+    glow: "rgba(6,182,212,0.15)",
+  },
+  {
+    key: "activeAlerts" as const,
+    label: "Active Alerts",
+    suffix: "",
+    changeKey: null,
+    changeLabel: "High-risk assessments",
+    icon: ShieldAlert,
+    color: "text-amber-400",
+    bg: "from-amber-500/8 to-transparent",
+    border: "rgba(245,158,11,0.2)",
+    glow: "rgba(245,158,11,0.15)",
+  },
+  {
+    key: "activeMedications" as const,
+    label: "Medications",
+    suffix: " active",
+    changeKey: null,
+    changeLabel: "Currently prescribed",
+    icon: Pill,
+    color: "text-violet-400",
+    bg: "from-violet-500/8 to-transparent",
+    border: "rgba(139,92,246,0.2)",
+    glow: "rgba(139,92,246,0.15)",
+  },
+  {
+    key: "checkIns" as const,
+    label: "Check-ins",
+    suffix: " total",
+    changeKey: "reportCount" as const,
+    changeLabel: "Health reports generated",
+    icon: CalendarCheck,
+    color: "text-emerald-400",
+    bg: "from-emerald-500/8 to-transparent",
+    border: "rgba(16,185,129,0.2)",
+    glow: "rgba(16,185,129,0.15)",
+  },
+];
 
 interface MetricCardProps {
   icon: React.ElementType;
@@ -72,10 +132,12 @@ function MetricCard({ icon: Icon, label, value, suffix, prefix, change, changeLa
           <div className={`w-10 h-10 rounded-xl ${bg} border flex items-center justify-center`} style={{ borderColor: border.replace("border-", "") }}>
             <Icon className={`w-5 h-5 ${color}`} />
           </div>
-          <div className={`flex items-center gap-1 text-xs font-medium ${trendColor}`}>
-            <TrendIcon className="w-3 h-3" />
-            <span>{Math.abs(change)}{suffix === "%" ? "" : "%"}</span>
-          </div>
+          {change !== 0 && (
+            <div className={`flex items-center gap-1 text-xs font-medium ${trendColor}`}>
+              <TrendIcon className="w-3 h-3" />
+              <span>{Math.abs(change)}{suffix === "%" ? "" : "%"}</span>
+            </div>
+          )}
         </div>
 
         <div className={`text-3xl font-bold tracking-tight mb-1 ${color}`}>
@@ -88,58 +150,43 @@ function MetricCard({ icon: Icon, label, value, suffix, prefix, change, changeLa
   );
 }
 
-const cards = [
-  {
-    icon: Heart,
-    label: "Health Score",
-    value: 78,
-    suffix: "/100",
-    change: 4,
-    changeLabel: "Up from 74 last month",
-    color: "text-cyan-400",
-    bg: "from-cyan-500/8 to-transparent",
-    border: "rgba(6,182,212,0.2)",
-    glow: "rgba(6,182,212,0.15)",
-  },
-  {
-    icon: ShieldAlert,
-    label: "Active Alerts",
-    value: 2,
-    suffix: "",
-    change: -1,
-    changeLabel: "1 resolved this week",
-    color: "text-amber-400",
-    bg: "from-amber-500/8 to-transparent",
-    border: "rgba(245,158,11,0.2)",
-    glow: "rgba(245,158,11,0.15)",
-  },
-  {
-    icon: Pill,
-    label: "Medications",
-    value: 3,
-    suffix: " active",
-    change: 0,
-    changeLabel: "No changes this month",
-    color: "text-violet-400",
-    bg: "from-violet-500/8 to-transparent",
-    border: "rgba(139,92,246,0.2)",
-    glow: "rgba(139,92,246,0.15)",
-  },
-  {
-    icon: CalendarCheck,
-    label: "Check-ins",
-    value: 12,
-    suffix: " this month",
-    change: 20,
-    changeLabel: "vs 10 last month",
-    color: "text-emerald-400",
-    bg: "from-emerald-500/8 to-transparent",
-    border: "rgba(16,185,129,0.2)",
-    glow: "rgba(16,185,129,0.15)",
-  },
-];
-
 export function HealthOverviewCards() {
+  const { data, isLoading } = useQuery<OverviewData>({
+    queryKey: ["dashboard", "overview"],
+    queryFn: () => fetch("/api/dashboard/overview").then((r) => r.json()),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="rounded-2xl border bg-card/70 backdrop-blur-sm p-6 animate-pulse">
+            <div className="w-10 h-10 rounded-xl bg-white/5 mb-4" />
+            <div className="h-8 w-20 bg-white/5 rounded mb-2" />
+            <div className="h-4 w-16 bg-white/5 rounded" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const cards = cardConfigs.map((cfg) => {
+    const value = data ? data[cfg.key] : 0;
+    const changeValue = cfg.changeKey && data ? data[cfg.changeKey] : 0;
+    return {
+      icon: cfg.icon,
+      label: cfg.label,
+      value,
+      suffix: cfg.suffix,
+      change: changeValue,
+      changeLabel: cfg.changeLabel,
+      color: cfg.color,
+      bg: cfg.bg,
+      border: cfg.border,
+      glow: cfg.glow,
+    };
+  });
+
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {cards.map((c, i) => (

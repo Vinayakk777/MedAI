@@ -1,25 +1,36 @@
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
   ResponsiveContainer, Tooltip
 } from "recharts";
 import { ShieldAlert } from "lucide-react";
 
-const riskData = [
-  { category: "Cardio", risk: 35, baseline: 50 },
-  { category: "Respiratory", risk: 22, baseline: 50 },
-  { category: "Metabolic", risk: 48, baseline: 50 },
-  { category: "Neurological", risk: 18, baseline: 50 },
-  { category: "Immune", risk: 30, baseline: 50 },
-  { category: "Musculo", risk: 42, baseline: 50 },
-];
+type RiskRecord = {
+  id: string;
+  category: string;
+  score: number;
+  baseline: number | null;
+  level: string;
+};
 
-const riskFactors = [
-  { label: "Cardiovascular", score: 35, color: "#06b6d4", level: "Low" },
-  { label: "Metabolic", score: 48, color: "#f59e0b", level: "Moderate" },
-  { label: "Musculoskeletal", score: 42, color: "#8b5cf6", level: "Moderate" },
-  { label: "Respiratory", score: 22, color: "#10b981", level: "Low" },
-];
+const categoryColors: Record<string, string> = {
+  Cardio: "#06b6d4",
+  Respiratory: "#10b981",
+  Metabolic: "#f59e0b",
+  Neurological: "#8b5cf6",
+  Immune: "#f43f5e",
+  Musculo: "#6366f1",
+};
+
+const categoryShort: Record<string, string> = {
+  Cardio: "Cardiovascular",
+  Respiratory: "Respiratory",
+  Metabolic: "Metabolic",
+  Neurological: "Neurological",
+  Immune: "Immune",
+  Musculo: "Musculoskeletal",
+};
 
 function RiskBar({ label, score, color, level, index }: { label: string; score: number; color: string; level: string; index: number }) {
   return (
@@ -57,6 +68,66 @@ const CustomTooltip = ({ active, payload }: any) => {
 };
 
 export function RiskAnalysisChart() {
+  const { data, isLoading } = useQuery<RiskRecord[]>({
+    queryKey: ["dashboard", "risk-assessments"],
+    queryFn: () => fetch("/api/dashboard/risk-assessments").then((r) => r.json()),
+  });
+
+  const records = data ?? [];
+
+  const riskData = records.map((r) => ({
+    category: r.category.length > 5 ? r.category.slice(0, 5) : r.category,
+    risk: r.score,
+    baseline: r.baseline ?? 50,
+  }));
+
+  const riskFactors = records.map((r) => ({
+    label: categoryShort[r.category] ?? r.category,
+    score: r.score,
+    color: categoryColors[r.category] ?? "#06b6d4",
+    level: r.level.charAt(0).toUpperCase() + r.level.slice(1),
+  }));
+
+  const avgScore = records.length > 0
+    ? Math.round(records.reduce((s, r) => s + r.score, 0) / records.length)
+    : null;
+
+  if (isLoading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+        className="rounded-2xl border border-white/5 bg-card/70 backdrop-blur-sm p-6"
+      >
+        <div className="animate-pulse h-[300px] flex items-center justify-center">
+          <p className="text-xs text-muted-foreground/40">Loading risk data...</p>
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (records.length === 0) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+        className="rounded-2xl border border-white/5 bg-card/70 backdrop-blur-sm p-6"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldAlert className="w-4 h-4 text-amber-400" />
+          <h3 className="text-sm font-semibold text-foreground">Risk Analysis</h3>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">No risk assessments yet</p>
+        <div className="text-center py-8">
+          <ShieldAlert className="w-8 h-8 text-muted-foreground/20 mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground/50">Complete a symptom check to see risk analysis</p>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -101,7 +172,9 @@ export function RiskAnalysisChart() {
           <div className="w-2 h-2 rounded-full bg-cyan-400" />
           <span className="text-muted-foreground">Your risk profile</span>
         </div>
-        <span className="text-emerald-400 font-semibold">Below Average Overall</span>
+        <span className="text-emerald-400 font-semibold">
+          {avgScore != null ? `${avgScore}% avg` : "No data"}
+        </span>
       </div>
     </motion.div>
   );

@@ -58,7 +58,7 @@ const features = [
     icon: Siren,
     title: "Emergency Guidance",
     description:
-      "Built-in red-flag detection instantly identifies symptoms that warrant emergency care. One tap connects you to 911 with your location and a clinical summary.",
+      "Built-in red-flag detection instantly identifies symptoms that warrant emergency care. One tap connects you to 108 with your location and a clinical summary.",
     gradient: "from-rose-500/20 to-red-500/10",
     glow: "rgba(244,63,94,0.15)",
     iconColor: "text-rose-400",

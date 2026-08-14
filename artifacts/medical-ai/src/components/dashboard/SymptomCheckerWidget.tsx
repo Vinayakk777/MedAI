@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Stethoscope, X, AlertCircle, CheckCircle, Loader2, ChevronRight } from "lucide-react";
 
 const SYMPTOM_CATEGORIES = [
@@ -72,9 +73,21 @@ const levelStyles: Record<AssessmentLevel, { bg: string; border: string; icon: s
 };
 
 export function SymptomCheckerWidget() {
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
-  const [checking, setChecking] = useState(false);
   const [assessment, setAssessment] = useState<Assessment | null>(null);
+
+  const saveMutation = useMutation({
+    mutationFn: (data: { symptoms: string[]; assessmentLevel: string; assessmentTitle: string; assessmentDescription: string; assessmentAction: string }) =>
+      fetch("/api/dashboard/symptom-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "overview"] });
+    },
+  });
 
   const toggle = (s: string) => {
     setAssessment(null);
@@ -83,12 +96,16 @@ export function SymptomCheckerWidget() {
 
   const runCheck = () => {
     if (!selected.length) return;
-    setChecking(true);
     setAssessment(null);
-    setTimeout(() => {
-      setAssessment(generateAssessment(selected));
-      setChecking(false);
-    }, 1400);
+    const result = generateAssessment(selected);
+    saveMutation.mutate({
+      symptoms: selected,
+      assessmentLevel: result.level,
+      assessmentTitle: result.title,
+      assessmentDescription: result.description,
+      assessmentAction: result.action,
+    });
+    setAssessment(result);
   };
 
   const reset = () => { setSelected([]); setAssessment(null); };
@@ -159,11 +176,11 @@ export function SymptomCheckerWidget() {
         )}
         <button
           onClick={runCheck}
-          disabled={selected.length === 0 || checking}
+          disabled={selected.length === 0 || saveMutation.isPending}
           data-testid="button-check-symptoms"
           className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
         >
-          {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Stethoscope className="w-4 h-4" />}
+          {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Stethoscope className="w-4 h-4" />}
           Analyze
         </button>
       </div>

@@ -28,7 +28,7 @@ const ACTIONS = [
   {
     icon: Siren,
     label: "Emergency Guide",
-    sub: "Know when to call 911",
+    sub: "Know when to call 108",
     href: "/dashboard#emergency",
     color: "text-rose-400",
     bg: "bg-rose-500/10",

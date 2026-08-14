@@ -1,10 +1,42 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import conversationsRouter from "./conversations";
+import dashboardRouter from "./dashboard";
+import laboratoryRouter from "./laboratory";
+import reportsRouter from "./reports";
+import memoryRouter from "./memory";
+import referralsRouter from "./referrals";
+import wellnessRouter from "./wellness";
+import ragRouter from "./rag";
+import ragAdminRouter from "./rag-admin";
+import multiAgentRouter from "./multi-agent";
+import safetyRouter from "./safety";
+import safetyAdminRouter from "./safety-admin";
+import observabilityRouter from "./observability";
+import clinicianRouter from "./clinician";
+import medicalDocumentsRouter from "./medical-documents";
+import voiceRouter from "./voice";
+import imagesRouter from "./images";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(conversationsRouter);
+router.use(dashboardRouter);
+router.use(laboratoryRouter);
+router.use(reportsRouter);
+router.use(memoryRouter);
+router.use(wellnessRouter);
+router.use(referralsRouter);
+router.use(ragRouter);
+router.use(ragAdminRouter);
+router.use(multiAgentRouter);
+router.use(safetyRouter);
+router.use(safetyAdminRouter);
+router.use(observabilityRouter);
+router.use(clinicianRouter);
+router.use(medicalDocumentsRouter);
+router.use(voiceRouter);
+router.use(imagesRouter);
 
 export default router;

@@ -157,6 +157,51 @@ function keepAlive() {
   }
 }
 
+// Returns reader-friendly plain text for TTS: strips markdown formatting
+// (bold/italic/headers/lists/code/links/images) so the voice does NOT read
+// symbols like ** or #. Only human-readable words are spoken.
+function stripMarkdownForSpeech(text: string): string {
+  if (!text) return "";
+
+  let t = text
+    // Images: ![alt](url) -> alt
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // Links: [label](url) -> label
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    // Inline code / backticks
+    .replace(/`([^`]*)`/g, "$1")
+    // Bold + italic combined: ***x*** -> x
+    .replace(/\*\*\*([^*]+)\*\*\*/g, "$1")
+    // Bold: **x** -> x
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    // Italic: *x* -> x (single asterisks only, avoids mangling ordinary text)
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1$2")
+    // Strikethrough
+    .replace(/~~([^~]+)~~/g, "$1")
+    // Headers: # Heading -> Heading
+    .replace(/^#{1,6}\s+/gm, "")
+    // Blockquotes
+    .replace(/^>\s?/gm, "")
+    // Unordered list markers
+    .replace(/^\s*[-*+]\s+/gm, "")
+    // Ordered list markers "1." -> "1" (keep number for readability)
+    .replace(/^\s*\d+\.\s+/gm, (m) => m.replace(/\./, ". ").replace(/\s+/g, " "))
+    // Code fences
+    .replace(/```[\s\S]*?```/g, " ")
+    // Horizontal rules
+    .replace(/^\s*([-*_]\s?){3,}\s*$/gm, " ")
+    // HTML tags (e.g. <br>, <strong>)
+    .replace(/<[^>]+>/g, " ")
+    // Collapse stray asterisks/backticks/# that survived
+    .replace(/[*_`#>\[\]~]/g, "")
+    // Normalize whitespace: collapse runs of spaces/newlines into single spaces
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Remove any leading/trailing colon+asterisk artifacts like "**Consultation Summary**"
+  return t;
+}
+
 function stopSpeech() {
   if (!supported) return;
   window.speechSynthesis.cancel();
@@ -170,7 +215,8 @@ function stopSpeech() {
 }
 
 function speakSpeech(id: string, text: string) {
-  if (!supported || !text.trim()) return;
+  const plain = stripMarkdownForSpeech(text);
+  if (!supported || !plain.trim()) return;
 
   // Only one response speaks at a time.
   if (currentSpeakingId !== null && currentSpeakingId !== id) {
@@ -180,7 +226,7 @@ function speakSpeech(id: string, text: string) {
   window.speechSynthesis.cancel();
   clearKeepAlive();
 
-  const utterance = new SpeechSynthesisUtterance(text);
+  const utterance = new SpeechSynthesisUtterance(plain);
   const voice = pickVoice();
   if (voice) utterance.voice = voice;
   utterance.lang = voice?.lang ?? "en-US";

@@ -82,7 +82,35 @@ export class ClinicalSafetyValidator implements SafetyValidator {
       "severe bleeding", "unconscious", "stroke symptoms", "seizure",
       "head injury", "poisoning", "suicidal", "overdose", "severe allergic reaction"];
 
+    // Split into sentences so we can tell whether a symptom mention is inside a
+    // question / example list (safe: asking the patient about symptoms) versus a
+    // statement minimizing a dangerous condition (unsafe).
+    const sentences = lower.split(/[.!?]+\s*/).filter(Boolean);
+
     const foundDangerous = dangerousSymptoms.filter((s) => lower.includes(s));
+
+    const exemptedQuestions: string[] = [];
+    const realMentions: string[] = [];
+
+    for (const symptom of foundDangerous) {
+      const sentence = sentences.find((sn) => sn.includes(symptom));
+      if (!sentence) {
+        realMentions.push(symptom);
+        continue;
+      }
+      const isQuestion =
+        sentence.includes("?") ||
+        /(^|\s)(are|is|do|does|did|have|has|had|would|could|should|can) (you|i|we|he|she|it)\b/.test(sentence) ||
+        /\b(e\.g\.|such as|for example|like)\b/.test(sentence);
+      if (isQuestion) {
+        exemptedQuestions.push(symptom);
+      } else {
+        realMentions.push(symptom);
+      }
+    }
+
+    const foundDangerousEffective = realMentions;
+
     // Any clear care-seeking or escalation language satisfies the guardrail —
     // not just literal "emergency/911" words. Otherwise perfectly safe advice
     // like "shortness of breath should be checked by a doctor" would be blocked.
@@ -94,17 +122,21 @@ export class ClinicalSafetyValidator implements SafetyValidator {
       "consult a doctor", "consult your doctor", "consult a physician",
       "consult your physician", "visit your doctor", "visit a doctor",
       "seek medical", "medical attention", "healthcare professional",
-      "health care professional", "get checked", "be evaluated", "get evaluated",
+      "health care professional", "healthcare provider", "health care provider",
+      "medical professional", "qualified healthcare", "qualified health care",
+      "get checked", "be evaluated", "get evaluated", "seek care",
+      "professional medical advice", "not a substitute", "your doctor",
+      "your physician",
     ].some((p) => lower.includes(p));
 
-    if (foundDangerous.length > 0 && !hasEscalation) {
+    if (foundDangerousEffective.length > 0 && !hasEscalation) {
       return {
         validatorName: this.name,
         status: "failed",
         severity: "critical",
-        message: `Dangerous symptom(s) detected without escalation: ${foundDangerous.join(", ")}`,
-        details: { symptoms: foundDangerous, hasEscalation: false },
-        triggerText: foundDangerous.join(", "),
+        message: `Dangerous symptom(s) detected without escalation: ${foundDangerousEffective.join(", ")}`,
+        details: { symptoms: foundDangerousEffective, hasEscalation: false },
+        triggerText: foundDangerousEffective.join(", "),
         suggestedAction: "block",
       };
     }
@@ -114,7 +146,7 @@ export class ClinicalSafetyValidator implements SafetyValidator {
       status: "passed",
       severity: "info",
       message: "Dangerous symptoms properly handled.",
-      details: { foundDangerous: foundDangerous.length },
+      details: { foundDangerous: foundDangerousEffective.length, exemptedQuestions },
       suggestedAction: "allow",
     };
   }

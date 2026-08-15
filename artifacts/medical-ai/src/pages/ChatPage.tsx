@@ -8,6 +8,7 @@ import { useUser, useClerk } from "@clerk/react";
 import { ChatSidebar, type ServerConversation } from "@/components/chat/ChatSidebar";
 import { ChatMessage, type Message, type Attachment } from "@/components/chat/ChatMessage";
 import { ChatInput, type PendingAttachment } from "@/components/chat/ChatInput";
+import { VoicePicker } from "@/components/chat/VoicePicker";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { SuggestionChips } from "@/components/chat/SuggestionChips";
 import { EmptyState } from "@/components/chat/EmptyState";
@@ -297,7 +298,9 @@ export default function ChatPage() {
   // ---------- scroll ----------
 
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Instant scroll during streaming so rapid token updates don't fight the
+    // scroll animation and look janky.
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, []);
 
   useEffect(() => {
@@ -462,16 +465,24 @@ export default function ChatPage() {
         }
 
         if (donePayload) {
-          setMessages((prev) => [
-            ...prev.filter(
-              (m) =>
-                m.id !== tempUserId &&
-                m.id !== tempAiId &&
-                m.id !== reuseUserMessageId,
-            ),
-            toClientMsg(donePayload!.userMessage),
-            toClientMsg(donePayload!.aiMessage),
-          ]);
+          // Update in place (stable keys) so AnimatePresence doesn't exit/enter
+          // animate the freshly-streamed message — otherwise the text flickers
+          // out and back in (the "glitch") on every completed reply.
+          setMessages((prev) =>
+            prev
+              .filter((m) => m.id !== reuseUserMessageId)
+              .map((m) => {
+                if (m.id === tempUserId) {
+                  const um = toClientMsg(donePayload!.userMessage);
+                  return { ...m, content: um.content, attachments: um.attachments, timestamp: um.timestamp };
+                }
+                if (m.id === tempAiId) {
+                  const am = toClientMsg(donePayload!.aiMessage);
+                  return { ...m, content: am.content };
+                }
+                return m;
+              }),
+          );
           retryPayloadRef.current = null;
         }
         setIsTyping(false);
@@ -621,6 +632,7 @@ export default function ChatPage() {
               <Sparkles className="w-3 h-3 text-primary" />
               <span className="text-[10px] text-primary font-medium">MedAI v2.0</span>
             </div>
+            <VoicePicker />
             <button
               onClick={toggleTheme}
               className="p-2 rounded-xl text-muted-foreground/50 hover:text-foreground hover:bg-white/5 transition-all"

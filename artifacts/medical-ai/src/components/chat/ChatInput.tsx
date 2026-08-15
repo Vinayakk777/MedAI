@@ -29,14 +29,16 @@ interface ChatInputProps {
   onTranscript?: (text: string) => void;
 }
 
-function voiceErrorMessage(code: VoiceErrorCode): string {
+function voiceErrorMessage(code: VoiceErrorCode, brave: boolean): string {
   switch (code) {
     case "permission-denied":
       return "Microphone access was denied. Allow microphone access in your browser settings to use voice input.";
     case "no-speech":
-      return "I couldn't hear any speech. Please try again.";
+      return "I couldn't hear any speech. Make sure your microphone is on and not muted, then try again.";
     case "network":
-      return "Speech recognition hit a network error. Check your connection and try again.";
+      return brave
+        ? "Brave blocks the speech-recognition service for privacy, so voice input can't work here. Please open this site in Chrome or Edge to use voice input."
+        : "Speech recognition hit a network error. Check your connection and try again.";
     case "audio-capture":
       return "No microphone was detected on this device.";
     case "unsupported":
@@ -66,7 +68,7 @@ export function ChatInput({
   const [interim, setInterim] = useState("");
   const [dragActive, setDragActive] = useState(false);
 
-  const { supported, status, isListening, start, stop, cancel } = useSpeechRecognition({
+  const { supported, status, isListening, isBrave, start, stop, cancel } = useSpeechRecognition({
     onResult: (text) => {
       setInterim("");
       if (onTranscript) onTranscript(text);
@@ -74,7 +76,7 @@ export function ChatInput({
     onInterim: (text) => setInterim(text),
     onError: (code) => {
       setInterim("");
-      toast({ title: "Voice input", description: voiceErrorMessage(code), variant: "destructive" });
+      toast({ title: "Voice input", description: voiceErrorMessage(code, isBrave), variant: "destructive" });
     },
   });
 
@@ -127,7 +129,7 @@ export function ChatInput({
       return;
     }
     if (!supported) {
-      toast({ title: "Voice input", description: voiceErrorMessage("unsupported"), variant: "destructive" });
+      toast({ title: "Voice input", description: voiceErrorMessage("unsupported", isBrave), variant: "destructive" });
       return;
     }
     setInterim("");

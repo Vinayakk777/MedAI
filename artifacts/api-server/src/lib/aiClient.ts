@@ -5,7 +5,7 @@ const groqClient = groqKey
   ? new OpenAI({ apiKey: groqKey, baseURL: "https://api.groq.com/openai/v1" })
   : null;
 
-const MODEL = "llama-3.1-8b-instant";
+const MODEL = "openai/gpt-oss-20b";
 
 export interface JSONGenParams {
   systemPrompt: string;

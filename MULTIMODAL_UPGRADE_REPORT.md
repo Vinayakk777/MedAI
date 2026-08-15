@@ -8,7 +8,7 @@ The existing AI Medical Chatbot was upgraded into a single unified multimodal ch
 
 ## Features delivered
 
-- **Text chat** (unchanged) — SSE streaming via Groq `llama-3.3-70b-versatile`.
+- **Text chat** (unchanged) — SSE streaming via Groq `openai/gpt-oss-120b`.
 - **Voice input** — browser Web Speech API (`SpeechRecognition`) mic button in the chat input with interim transcript, permission / no-speech / network / unsupported error mapping.
 - **Voice output** — browser `speechSynthesis` reading assistant replies with play / pause / resume, speaking equalizer indicator, and one-at-a-time module-wide singleton.
 - **Image upload & analysis** — attach up to 6 images, drag-and-drop, client-side compression + progress uploads, secure private storage, vision streaming via Groq `qwen/qwen3.6-27b` with `reasoning_effort: "none"` (no thinking-block leakage).
@@ -51,7 +51,7 @@ Required (existing): `DATABASE_URL`, `GROQ_API_KEY`, `CLERK_SECRET_KEY`, `CLERK_
 
 Optional: `DEV_AUTH_USER_ID` (local development auth bypass — never set in production).
 
-Models: `CHAT_MODEL=llama-3.3-70b-versatile`, `VISION_MODEL=qwen/qwen3.6-27b` (verified data-url + streaming, `reasoning_effort:"none"`).
+Models: `CHAT_MODEL=openai/gpt-oss-120b`, `VISION_MODEL=qwen/qwen3.6-27b` (verified data-url + streaming, `reasoning_effort:"none"`). Migrated off the decommissioned `llama-3.3-70b-versatile` (Groq shut down Aug 16 2026); JSON-generation engines use `openai/gpt-oss-20b`.
 
 Voice uses the browser Web Speech API (Chrome/Edge) — no extra keys or servers needed; the existing `/ws/voice` WebSocket engine remains for the older voice mode.
 

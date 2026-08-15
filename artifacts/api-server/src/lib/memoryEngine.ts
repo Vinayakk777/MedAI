@@ -2,8 +2,10 @@ import { db } from "@workspace/db";
 import { eq, and, desc, sql, or, gte, lte } from "drizzle-orm";
 import {
   medicalMemoryTable,
+  resolvedConditionsTable,
   type MedicalMemory,
   type InsertMedicalMemory,
+  type InsertResolvedCondition,
 } from "@workspace/db";
 import type { ConsultationState } from "./orchestrator";
 import { getEffectiveDDx } from "./orchestrator";
@@ -258,7 +260,14 @@ function toNameKey(value: unknown): string {
 }
 
 export async function getMedicalHistorySummary(userId: string): Promise<MedicalHistorySummary> {
-  const memories = await getUserMedicalMemory(userId);
+  const [memories, resolvedConditions] = await Promise.all([
+    getUserMedicalMemory(userId),
+    getResolvedConditions(userId),
+  ]);
+
+  // Conditions the user explicitly marked as resolved/issue solved. These are
+  // removed from the active list but remain visible under past conditions.
+  const resolvedKeys = new Set(resolvedConditions.map((r) => toNameKey(r.conditionName)));
 
   // Aggregate conditions across all memories
   const conditionMap = new Map<string, { count: number; first: Date; last: Date }>();
@@ -360,7 +369,7 @@ export async function getMedicalHistorySummary(userId: string): Promise<MedicalH
   const pastConditions: MedicalHistorySummary["pastConditions"] = [];
 
   for (const [name, info] of conditionMap) {
-    if (info.last >= sixMonthsAgo || info.count >= 2) {
+    if (!resolvedKeys.has(name) && (info.last >= sixMonthsAgo || info.count >= 2)) {
       activeConditions.push({
         name: capitalize(name),
         firstRecorded: info.first.toISOString(),
@@ -541,6 +550,94 @@ export async function updateMedicalMemory(
     .update(medicalMemoryTable)
     .set({ ...updates, updatedAt: new Date() })
     .where(and(eq(medicalMemoryTable.id, id), eq(medicalMemoryTable.userId, userId)));
+}
+
+// ─── Resolved conditions ───
+
+export interface ResolvedConditionEntry {
+  id: string;
+  conditionName: string;
+  resolvedAt: string;
+}
+
+export async function getResolvedConditions(userId: string): Promise<ResolvedConditionEntry[]> {
+  const rows = await db
+    .select({
+      id: resolvedConditionsTable.id,
+      conditionName: resolvedConditionsTable.conditionName,
+      resolvedAt: resolvedConditionsTable.resolvedAt,
+    })
+    .from(resolvedConditionsTable)
+    .where(
+      and(
+        eq(resolvedConditionsTable.userId, userId),
+        eq(resolvedConditionsTable.isArchived, false),
+      ),
+    )
+    .orderBy(desc(resolvedConditionsTable.resolvedAt));
+  return rows.map((r) => ({
+    id: r.id,
+    conditionName: r.conditionName,
+    resolvedAt: r.resolvedAt.toISOString(),
+  }));
+}
+
+export async function addResolvedCondition(
+  userId: string,
+  conditionName: string,
+  notes?: string,
+): Promise<ResolvedConditionEntry> {
+  const existing = await db
+    .select()
+    .from(resolvedConditionsTable)
+    .where(
+      and(
+        eq(resolvedConditionsTable.userId, userId),
+        eq(sql`lower(${resolvedConditionsTable.conditionName})`, conditionName.toLowerCase()),
+        eq(resolvedConditionsTable.isArchived, false),
+      ),
+    )
+    .limit(1);
+
+  if (existing[0]) {
+    return {
+      id: existing[0].id,
+      conditionName: existing[0].conditionName,
+      resolvedAt: existing[0].resolvedAt.toISOString(),
+    };
+  }
+
+  const row: InsertResolvedCondition = {
+    userId,
+    conditionName: conditionName.trim(),
+    notes: notes ?? null,
+  };
+  const [inserted] = await db
+    .insert(resolvedConditionsTable)
+    .values(row)
+    .returning({
+      id: resolvedConditionsTable.id,
+      conditionName: resolvedConditionsTable.conditionName,
+      resolvedAt: resolvedConditionsTable.resolvedAt,
+    });
+  return {
+    id: inserted.id,
+    conditionName: inserted.conditionName,
+    resolvedAt: inserted.resolvedAt.toISOString(),
+  };
+}
+
+export async function undoResolvedCondition(id: string, userId: string): Promise<void> {
+  await db
+    .update(resolvedConditionsTable)
+    .set({ isArchived: true, updatedAt: new Date() })
+    .where(
+      and(
+        eq(resolvedConditionsTable.id, id),
+        eq(resolvedConditionsTable.userId, userId),
+        eq(resolvedConditionsTable.isArchived, false),
+      ),
+    );
 }
 
 // ─── Helpers ───

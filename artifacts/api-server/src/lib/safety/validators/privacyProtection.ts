@@ -32,10 +32,13 @@ export class PrivacyProtector implements SafetyValidator {
       if (matches) {
         // Check if PHI is in medical context (higher risk)
         const inMedicalContext = this.medicalContextTerms.test(response);
+        // A bare 5-digit number (e.g. "50000 IU" of vitamin D) is usually NOT a
+        // zip code — treat zip-like numbers as a warning, never a hard block.
+        const isZipLike = entry.category === "zip";
 
         results.push({
           validatorName: this.name,
-          status: "failed",
+          status: isZipLike ? "warning" : "failed",
           severity: entry.severity,
           message: `Potential PHI detected: ${entry.description} (${matches.length} occurrence(s))`,
           details: {
@@ -44,7 +47,7 @@ export class PrivacyProtector implements SafetyValidator {
             inMedicalContext,
           },
           triggerText: matches[0],
-          suggestedAction: "block",
+          suggestedAction: isZipLike ? "warn" : "block",
         });
       }
     }

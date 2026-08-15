@@ -159,7 +159,7 @@ router.get("/observability/providers/recommended", requireAuth, async (req: Auth
   try {
     const taskType = (req.query.task as string) || "generation";
     const recommended = await providers.getRecommendedProvider(taskType);
-    res.json(recommended || { provider: "groq", model: "llama-3.3-70b-versatile" });
+    res.json(recommended || { provider: "groq", model: "openai/gpt-oss-120b" });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

@@ -17,3 +17,4 @@ export * from "./observability";
 export * from "./clinician_portal";
 export * from "./medical_documents";
 export * from "./voice_consultations";
+export * from "./resolved_conditions";

@@ -11,6 +11,9 @@ import {
   archiveMedicalMemory,
   deleteMedicalMemory,
   updateMedicalMemory,
+  getResolvedConditions,
+  addResolvedCondition,
+  undoResolvedCondition,
 } from "../lib/memoryEngine";
 
 const router: IRouter = Router();
@@ -83,6 +86,47 @@ router.get("/memory/filter", requireAuth, async (req, res) => {
   } catch (err) {
     (req as any).log.error({ err }, "filter memory failed");
     res.status(500).json({ error: "Failed to filter memory" });
+  }
+});
+
+// ─── Resolved conditions (issue solved) ───
+
+router.get("/memory/resolved-conditions", requireAuth, async (req, res) => {
+  const { userId } = req as AuthRequest;
+  try {
+    res.json(await getResolvedConditions(userId));
+  } catch (err) {
+    (req as any).log.error({ err }, "fetch resolved conditions failed");
+    res.status(500).json({ error: "Failed to fetch resolved conditions" });
+  }
+});
+
+router.post("/memory/resolved-conditions", requireAuth, async (req, res) => {
+  const { userId } = req as AuthRequest;
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const notes = typeof req.body?.notes === "string" ? req.body.notes : undefined;
+  if (!name) {
+    res.status(400).json({ error: "Condition name is required" });
+    return;
+  }
+  try {
+    const entry = await addResolvedCondition(userId, name, notes);
+    res.status(201).json(entry);
+  } catch (err) {
+    (req as any).log.error({ err }, "resolve condition failed");
+    res.status(500).json({ error: "Failed to resolve condition" });
+  }
+});
+
+router.delete("/memory/resolved-conditions/:id", requireAuth, async (req, res) => {
+  const { userId } = req as AuthRequest;
+  const id = String(req.params.id);
+  try {
+    await undoResolvedCondition(id, userId);
+    res.json({ success: true });
+  } catch (err) {
+    (req as any).log.error({ err }, "undo resolved condition failed");
+    res.status(500).json({ error: "Failed to undo resolved condition" });
   }
 });
 

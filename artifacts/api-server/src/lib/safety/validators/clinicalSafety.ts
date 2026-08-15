@@ -83,8 +83,19 @@ export class ClinicalSafetyValidator implements SafetyValidator {
       "head injury", "poisoning", "suicidal", "overdose", "severe allergic reaction"];
 
     const foundDangerous = dangerousSymptoms.filter((s) => lower.includes(s));
-    const hasEscalation = lower.includes("emergency") || lower.includes("call 911") ||
-      lower.includes("call 108") || lower.includes("immediate") || lower.includes("go to the er");
+    // Any clear care-seeking or escalation language satisfies the guardrail —
+    // not just literal "emergency/911" words. Otherwise perfectly safe advice
+    // like "shortness of breath should be checked by a doctor" would be blocked.
+    const hasEscalation = [
+      "emergency", "call 911", "call 108", "immediate", "go to the er",
+      "go to the emergency", "urgent care", "hospital", "er visit",
+      "call your doctor", "call your physician", "call a doctor",
+      "see a doctor", "see your doctor", "see a physician", "see your physician",
+      "consult a doctor", "consult your doctor", "consult a physician",
+      "consult your physician", "visit your doctor", "visit a doctor",
+      "seek medical", "medical attention", "healthcare professional",
+      "health care professional", "get checked", "be evaluated", "get evaluated",
+    ].some((p) => lower.includes(p));
 
     if (foundDangerous.length > 0 && !hasEscalation) {
       return {

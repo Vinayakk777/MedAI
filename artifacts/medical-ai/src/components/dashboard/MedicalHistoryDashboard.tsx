@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   HeartPulse, Activity, Pill, Stethoscope, AlertTriangle,
   FlaskConical, ScanLine, Download, ChevronDown, ChevronUp,
   Calendar, ShieldAlert, Brain, Thermometer, Weight,
-  Moon, Sun, Cigarette, Wine,
+  Moon, Sun, Cigarette, Wine, CheckCircle2, Loader2, Undo2,
 } from "lucide-react";
 
 type HistorySummary = {
   activeConditions: { name: string; firstRecorded: string; lastRecorded: string; count: number }[];
   pastConditions: { name: string; firstRecorded: string; lastRecorded: string }[];
+  resolvedConditions: { id: string; conditionName: string; resolvedAt: string }[];
   allergies: string[];
   currentMedications: string[];
   medicationHistory: string[];
@@ -41,6 +42,31 @@ export function MedicalHistoryDashboard() {
   const { data, isLoading, error } = useQuery<HistorySummary>({
     queryKey: ["medical-history-summary"],
     queryFn: () => fetch("/api/memory/history-summary").then((r) => r.json()),
+  });
+
+  const queryClient = useQueryClient();
+  const refreshHistory = () => queryClient.invalidateQueries({ queryKey: ["medical-history-summary"] });
+
+  const resolveCondition = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await fetch("/api/memory/resolved-conditions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error("Failed to mark condition as solved");
+      return res.json();
+    },
+    onSuccess: refreshHistory,
+  });
+
+  const undoResolved = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/memory/resolved-conditions/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to undo resolved condition");
+      return res.json();
+    },
+    onSuccess: refreshHistory,
   });
 
   const handleExport = () => {
@@ -130,7 +156,7 @@ export function MedicalHistoryDashboard() {
           {data.activeConditions.length > 0 ? (
             <div className="space-y-1">
               {data.activeConditions.slice(0, 5).map((c, i) => (
-                <ConditionRow key={i} condition={c} />
+                <ConditionRow key={i} condition={c} onResolve={resolveCondition.mutate} resolving={resolveCondition.isPending} />
               ))}
               {data.activeConditions.length > 5 && (
                 <p className="text-[10px] text-muted-foreground/40 mt-1">
@@ -151,14 +177,38 @@ export function MedicalHistoryDashboard() {
           </div>
           {data.pastConditions.length > 0 ? (
             <div className="space-y-1">
-              {data.pastConditions.slice(0, 5).map((c, i) => (
-                <div key={i} className="flex items-center justify-between py-1">
-                  <span className="text-xs text-muted-foreground">{c.name}</span>
-                  <span className="text-[10px] text-muted-foreground/30">
-                    {new Date(c.lastRecorded).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-                  </span>
-                </div>
-              ))}
+              {data.pastConditions.slice(0, 5).map((c, i) => {
+                const resolved = data.resolvedConditions.find(
+                  (r) => r.conditionName.toLowerCase() === c.name.toLowerCase(),
+                );
+                return (
+                  <div key={i} className="flex items-center justify-between py-1 gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${resolved ? "bg-emerald-400/60" : "bg-muted-foreground/20"}`} />
+                      <span className="text-xs text-muted-foreground truncate">{c.name}</span>
+                      {resolved && (
+                        <span className="text-[10px] text-emerald-400/70 flex-shrink-0">solved</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="text-[10px] text-muted-foreground/30">
+                        {new Date(c.lastRecorded).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                      </span>
+                      {resolved && (
+                        <button
+                          onClick={() => undoResolved.mutate(resolved.id)}
+                          disabled={undoResolved.isPending}
+                          title="Move back to active conditions"
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-muted-foreground/50 border border-white/10 hover:text-foreground hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                        >
+                          {undoResolved.isPending ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Undo2 className="w-2.5 h-2.5" />}
+                          Undo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
               {data.pastConditions.length > 5 && (
                 <p className="text-[10px] text-muted-foreground/40">+{data.pastConditions.length - 5} more</p>
               )}
@@ -322,9 +372,13 @@ function StatBox({ label, value, icon: Icon, valueColor }: {
   );
 }
 
-function ConditionRow({ condition }: { condition: HistorySummary["activeConditions"][0] }) {
+function ConditionRow({ condition, onResolve, resolving }: {
+  condition: HistorySummary["activeConditions"][0];
+  onResolve: (name: string) => void;
+  resolving: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between py-1">
+    <div className="flex items-center justify-between py-1 gap-2">
       <div className="flex items-center gap-1.5 min-w-0 flex-1">
         <div className="w-1.5 h-1.5 rounded-full bg-rose-400 flex-shrink-0" />
         <span className="text-xs text-foreground truncate">{condition.name}</span>
@@ -332,9 +386,20 @@ function ConditionRow({ condition }: { condition: HistorySummary["activeConditio
           <span className="text-[10px] text-muted-foreground/30 flex-shrink-0">×{condition.count}</span>
         )}
       </div>
-      <span className="text-[10px] text-muted-foreground/30 flex-shrink-0 ml-2">
-        {new Date(condition.lastRecorded).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-      </span>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <span className="text-[10px] text-muted-foreground/30">
+          {new Date(condition.lastRecorded).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+        </span>
+        <button
+          onClick={() => onResolve(condition.name)}
+          disabled={resolving}
+          title="Mark as solved"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-emerald-400/70 bg-emerald-500/10 border border-emerald-500/20 hover:text-emerald-300 hover:bg-emerald-500/15 transition-colors disabled:opacity-50 disabled:cursor-wait"
+        >
+          {resolving ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
+          Solved
+        </button>
+      </div>
     </div>
   );
 }

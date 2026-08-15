@@ -44,7 +44,6 @@ export function DeviceSyncPanel() {
   const [config, setConfig] = useState<ProviderConfig | null>(() => loadConfig());
   const [connecting, setConnecting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [pendingDemoConfig, setPendingDemoConfig] = useState<ProviderConfig | null>(null);
 
   const { data: providers, isLoading: providersLoading } = useQuery<ProviderInfo[]>({
     queryKey: ["dashboard", "providers"],
@@ -77,14 +76,11 @@ export function DeviceSyncPanel() {
     },
     onSuccess: (data) => {
       if (data.demo && data.config) {
-        // Do NOT silently connect demo mode. Require an explicit opt-in so the
-        // user never mistakes simulated vitals for their real health data.
+        // Demo is the only available option when Google Health credentials
+        // aren't configured on the server. Enable it seamlessly but keep it
+        // clearly labeled as simulated so it's never mistaken for real data.
         setConnecting(false);
-        setPendingDemoConfig(data.config);
-        setStatus(
-          data.message ??
-            "Google Health credentials aren't configured, so a real account can't be connected right now.",
-        );
+        enableDemo(data.config, data.message);
         return;
       }
       if (!data.url) return;
@@ -97,13 +93,11 @@ export function DeviceSyncPanel() {
     },
   });
 
-  const optInToDemo = () => {
-    if (!pendingDemoConfig) return;
-    const demoConfig: ProviderConfig = { ...pendingDemoConfig, demo: true };
-    saveConfig(demoConfig);
-    setConfig(demoConfig);
-    setPendingDemoConfig(null);
-    setStatus("Demo preview enabled — any vitals shown are simulated, not from your real account.");
+  const enableDemo = (demoConfig: ProviderConfig, message?: string) => {
+    const finalConfig: ProviderConfig = { ...demoConfig, demo: true };
+    saveConfig(finalConfig);
+    setConfig(finalConfig);
+    setStatus(message ?? "Demo preview enabled — any vitals shown are simulated, not from your real account.");
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
@@ -276,42 +270,13 @@ export function DeviceSyncPanel() {
             )}
           </div>
 
-          {!connected && !pendingDemoConfig && (
+          {!connected && (
             <p className="text-[10px] text-muted-foreground/40 mt-3 flex items-start gap-1.5">
               <Smartphone className="w-3 h-3 flex-shrink-0 mt-0.5" />
-              You'll be redirected to Google to authorize. Once approved, you'll return here and can sync immediately.
+              {isDemoConnected
+                ? "Simulated vitals are enabled. Connect real Google Health credentials to sync your actual readings."
+                : "You'll be redirected to Google to authorize. Once approved, you'll return here and can sync immediately."}
             </p>
-          )}
-
-          {pendingDemoConfig && (
-            <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/8 p-3.5">
-              <div className="flex items-start gap-2 mb-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-xs font-semibold text-amber-300">Demo mode — no real Google account</p>
-                  <p className="text-[11px] text-amber-300/70 leading-relaxed mt-1">
-                    Google Health credentials are not configured on this server, so a real account can't be
-                    connected. If you continue, any vitals shown will be <strong>simulated demo data</strong>, not
-                    your actual health readings.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={optInToDemo}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/20 transition-colors"
-                >
-                  <FlaskConical className="w-3.5 h-3.5" />
-                  Preview with simulated data
-                </button>
-                <button
-                  onClick={() => setPendingDemoConfig(null)}
-                  className="px-3 py-2 rounded-xl text-xs font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
           )}
         </div>
 

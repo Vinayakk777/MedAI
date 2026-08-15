@@ -5,7 +5,7 @@ import { LLMProvider, LLMProviderConfig, LLMGenerateParams } from "../types";
 
 export class GroqProvider implements LLMProvider {
   readonly name = "groq";
-  readonly models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"];
+  readonly models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"];
   private client: OpenAI | null;
 
   constructor(config?: LLMProviderConfig) {
@@ -23,7 +23,7 @@ export class GroqProvider implements LLMProvider {
     if (!this.client) return null;
     try {
       const result = await this.client.chat.completions.create({
-        model: params.maxTokens && params.maxTokens > 4096 ? "llama-3.3-70b-versatile" : "llama-3.1-8b-instant",
+        model: params.maxTokens && params.maxTokens > 4096 ? "openai/gpt-oss-120b" : "openai/gpt-oss-20b",
         messages: [
           { role: "system", content: params.systemPrompt },
           { role: "user", content: params.userContent },
@@ -43,7 +43,7 @@ export class GroqProvider implements LLMProvider {
     if (!this.client) return null;
     try {
       const result = await this.client.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-120b",
         messages: [
           { role: "system", content: params.systemPrompt },
           { role: "user", content: params.userContent },

@@ -29,6 +29,7 @@ export class GroqProvider implements LLMProvider {
           { role: "user", content: params.userContent },
         ],
         response_format: { type: "json_object" },
+        reasoning_effort: "low" as never,
         temperature: params.temperature ?? 0.3,
         max_tokens: params.maxTokens ?? 2048,
       }, { signal: params.signal });

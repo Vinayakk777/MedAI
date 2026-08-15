@@ -1,20 +1,20 @@
-# MedAI — Intelligent Healthcare Assistant
+# MediBot-Core — AI-Powered Medical Assistant
 
 <div align="center">
 
-![MedAI](https://img.shields.io/badge/MedAI-v2.0-00b8d9?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0xIDE3aC0ydi02SDh2LTJoM1Y3aDJ2NEgxNnYyaC0zdjZ6Ii8+PC9zdmc+)
-[![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react)](https://react.dev)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite)](https://vitejs.dev)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss)](https://tailwindcss.com)
 [![Express](https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express)](https://expressjs.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql)](https://www.postgresql.org)
-[![Framer Motion](https://img.shields.io/badge/Framer_Motion-12-0055FF?style=flat-square&logo=framer)](https://www.framer.com/motion)
+[![Groq](https://img.shields.io/badge/Groq-LLM-F55036?style=flat-square&logo=groq)](https://groq.com)
+[![Clerk](https://img.shields.io/badge/Clerk-Auth-6C47FF?style=flat-square)](https://clerk.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-**A premium AI-powered healthcare SaaS application** — instant symptom analysis, medication lookup, health dashboards, and evidence-based guidance. Inspired by Stripe, Linear, and Apple design principles.
+**An end-to-end AI healthcare SaaS** — streaming symptom consultations, image analysis, medical history, health dashboards, safety guardrails, and clinician tooling.
 
-[**Live Demo →**](https://medai.replit.app) &nbsp;·&nbsp; [Features](#-features) &nbsp;·&nbsp; [Architecture](#-architecture) &nbsp;·&nbsp; [Setup](#-local-development) &nbsp;·&nbsp; [Deploy](#-deployment)
+[**Live Demo →**](https://medibot-core.onrender.com) &nbsp;·&nbsp; [Features](#-features) &nbsp;·&nbsp; [Architecture](#-architecture) &nbsp;·&nbsp; [Local Development](#-local-development) &nbsp;·&nbsp; [Deployment](#-deployment)
 
 </div>
 
@@ -22,176 +22,145 @@
 
 ## ✨ Features
 
-### 🏠 Landing Page
-- Animated hero with 3D-style health orb and gradient backgrounds
-- Stats section with animated counters (10M+ consultations, 98.7% accuracy)
-- 6 feature cards with Framer Motion stagger animations
-- 6 testimonial cards, trust/compliance badges (HIPAA, SOC 2, FDA)
-- Newsletter signup, dark/light theme toggle
+### 💬 AI Consultation Chat (`/chat`)
+- Real-time **SSE streaming** responses from Groq LLMs
+- **Multi-modal** — attach photos for AI vision analysis (rash, injuries, etc.)
+- Voice input + **text-to-speech** (markdown stripped before reading)
+- Conversation history grouped by day, persisted per user
+- Custom inline Markdown renderer + animated typing indicator
 
-### 💬 AI Chat Interface
-- Full-screen chat with collapsible sidebar (8 reusable components)
-- Custom inline Markdown renderer — bold, italic, code, bullets, blockquotes
-- Animated typing indicator with radiating pulse ring
-- Conversation history grouped by Today / Yesterday / Last 7 Days
-- Quick-action suggestion chips (horizontal-scroll, color-coded by topic)
-- Auto-resize textarea, voice-mode UI, file attachment button
-- Hover-to-reveal copy and thumbs up/down on AI messages
+### 🏥 Health Dashboard (`/dashboard`)
+- **Health overview** — score, active conditions, allergies, medications, labs, imaging
+- **Vital signs** — trends, analysis, alerts (heart rate, BP, sleep, activity)
+- **Medical history** — active vs past conditions, **"Solved"** flow (backed by the `resolved_conditions` table), health timeline
+- **Wellness** — goals, reminders, insights, symptom trends, referrals, AI health reports
+- **Device sync** — optional Google Health Connect integration (demo mode when unconfigured)
 
-### 📊 Health Dashboard
-- **Health Overview** — 4 animated stat cards with CountUp numbers and trend indicators
-- **Health Trends** — Tabbed AreaChart/BarChart (Heart Rate, Blood Pressure, Sleep, Activity)
-- **Risk Analysis** — RadarChart across 6 body systems + animated progress bars
-- **Vital Signs** — 6 vitals with real-time animated fill bars
-- **Symptom Checker** — Multi-select symptom categories → AI severity assessment
-- **Medication Guide** — Searchable cards with dosage, interactions, refill warnings
-- **AI Health Reports** — Timestamped generated reports with trend scores
-- **Emergency Guide** — 3-tier triage (Call 911 / Urgent Care / See Doctor)
+### 🛡️ AI Safety Guardrails
+- Multi-validator pipeline (`clinicalSafety`, medication safety, plus regression testing)
+- Dangerous-symptom detection with escalation-language awareness (question-form mentions of symptoms are exempt)
+- Every response evaluated & logged to `safety_evaluations`; admin **Safety Dashboard** + **Regression Reports**
+- Blocked responses are never sent to the patient
 
-### 🔧 Engineering
-- Route-level lazy loading (React.lazy + Suspense)
-- AnimatePresence page transitions
-- Global error boundary with recovery UI
-- Shimmer skeleton loaders for all loading states
-- Floating support widget on every page
-- Fully responsive — mobile, tablet, desktop
+### 👩‍⚕️ Clinician Portal (`/clinician`)
+- Pending consultation review, care plans, physician notes, FHIR export, alert center
+
+### 📄 Documents & RAG (`/documents`, `/rag-admin`)
+- Upload/process medical documents, lab values, medications, trends, image analysis
+- Admin RAG ingestion/reindexing of clinical guidelines
+
+### 🧪 Observability
+- Prompt versioning, provider comparison, feedback analytics, audit logs
 
 ---
 
 ## 🏗 Architecture
 
+pnpm-workspace monorepo — one build serves both API and frontend in production.
+
 ```
-medai-monorepo/
+MediBot-Core/
 ├── artifacts/
-│   ├── medical-ai/          # React + Vite frontend (port 24185)
+│   ├── medical-ai/          # React 19 + Vite frontend
 │   │   ├── src/
-│   │   │   ├── pages/           # Route-level pages (lazy loaded)
-│   │   │   │   ├── HomePage.tsx
-│   │   │   │   ├── ChatPage.tsx
-│   │   │   │   ├── DashboardPage.tsx
-│   │   │   │   └── AboutPage.tsx
-│   │   │   ├── components/
-│   │   │   │   ├── chat/        # 8 chat components
-│   │   │   │   ├── dashboard/   # 8 dashboard modules
-│   │   │   │   ├── sections/    # 6 landing page sections
-│   │   │   │   ├── layout/      # Navbar, Footer
-│   │   │   │   └── ui/          # shadcn/ui + custom primitives
-│   │   │   └── hooks/           # useTheme, custom hooks
-│   │   └── vite.config.ts
-│   └── api-server/          # Express 5 backend (port 8080)
-│       └── src/
-│           ├── routes/          # Route handlers by domain
-│           ├── middlewares/     # Auth, rate limiting, error handling
-│           └── lib/             # Logger, utilities
+│   │   │   ├── pages/           # Home, Chat, Dashboard, About, Clinician, Documents, RAG admin
+│   │   │   ├── components/      # chat/, dashboard/, clinician/, safety/, observability/, documents/, ui/
+│   │   │   └── App.tsx          # ClerkProvider + ErrorBoundary + AnimatedRouter
+│   │   └── vite.config.ts       # build.outDir = dist/public, base = BASE_PATH
+│   └── api-server/          # Express 5 backend (bundled to dist/index.mjs)
+│       ├── src/
+│       │   ├── routes/          # conversations, memory, dashboard, wellness, safety, clinician, documents, observability, rag-admin
+│       │   ├── lib/             # aiClient, multi-agent, safety/, memoryEngine, storage
+│       │   └── app.ts           # clerkMiddleware + serves ../medical-ai/dist/public
+│       └── e2e_test.mjs         # end-to-end API test suite
 ├── lib/
-│   ├── db/                  # Drizzle ORM + PostgreSQL schema
-│   ├── api-spec/            # OpenAPI 3.1 contract → codegen
-│   ├── api-zod/             # Generated Zod validation schemas
-│   └── api-client-react/    # Generated React Query hooks
-└── pnpm-workspace.yaml      # Workspace + catalog dependency pins
+│   └── db/                  # Drizzle ORM schema + migrations
+├── start_dev.ps1            # Windows dev launcher (API :5000, frontend :3000)
+├── DEPLOY.md                # Free deployment guide (Render + Neon + Groq + Clerk)
+└── pnpm-workspace.yaml      # Workspace + supply-chain pinning (minimumReleaseAge)
 ```
 
-### Request Flow
+### Request Flow (production)
 
 ```
-Browser (React SPA)
+Browser (React SPA served by Express)
     │
-    ├── Static assets → Vite dev server / CDN (production)
-    │
-    └── /api/* → Shared reverse proxy (port 80)
-                      │
-                      └── Express API Server
-                                │
-                                ├── PostgreSQL (Drizzle ORM)
-                                │
-                                └── OpenAI API (via Replit proxy)
+    ├── /api/*              → Express API (auth via Clerk)
+    │                         ├── PostgreSQL (Neon, Drizzle ORM)
+    │                         └── Groq LLMs (streaming SSE)
+    └── /api/__clerk/*      → Clerk proxy (frontend API)
 ```
 
-### Key Design Decisions
+### AI Model Routing (Groq)
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| Monorepo manager | pnpm workspaces | Shared deps via catalog, workspace:* refs |
-| API contract | OpenAPI 3.1 first → codegen | Single source of truth; Zod + React Query auto-generated |
-| ORM | Drizzle ORM | Type-safe, lightweight, zero-overhead SQL |
-| Styling | Tailwind CSS v4 | Utility-first, zero-runtime, JIT |
-| Animation | Framer Motion | Production-grade spring physics |
-| Charts | Recharts | Composable, SVG-based, React-native |
-| Auth | JWT + bcryptjs | Stateless, scalable, no session store needed |
-| Routing | Wouter | 2.1KB alternative to React Router |
+| Purpose | Model |
+|---|---|
+| Chat / voice text | `openai/gpt-oss-120b` |
+| JSON / analysis engines | `openai/gpt-oss-20b` (with `reasoning_effort: low`) |
+| Image / vision | `qwen/qwen3.6-27b` |
 
 ---
 
 ## 🛠 Tech Stack
 
 ### Frontend
-| Package | Version | Purpose |
-|---|---|---|
-| React | 18 | UI framework |
-| TypeScript | 5.9 | Type safety |
-| Vite | 7 | Build tool + HMR |
-| Tailwind CSS | 4 | Utility-first styling |
-| Framer Motion | 12 | Animations |
-| Recharts | 2.15 | Data visualizations |
-| shadcn/ui | latest | Component primitives |
-| Wouter | 3 | Client-side routing |
-| TanStack Query | 5 | Server state management |
-| Lucide React | latest | Icon system |
+| Package | Purpose |
+|---|---|
+| React 19 + TypeScript | UI framework |
+| Vite 7 | Build + HMR |
+| Tailwind CSS 4 | Styling |
+| Framer Motion | Animations |
+| Recharts | Charts |
+| Wouter | Client-side routing |
+| TanStack Query | Server state |
+| Clerk (`@clerk/clerk-react`) | Authentication |
 
 ### Backend
-| Package | Version | Purpose |
-|---|---|---|
-| Node.js | 24 | Runtime |
-| Express | 5 | HTTP framework |
-| Drizzle ORM | latest | Type-safe PostgreSQL ORM |
-| PostgreSQL | 16 | Primary database |
-| Zod | 3 (v4 API) | Runtime validation |
-| pino + pino-http | latest | Structured JSON logging |
-| jsonwebtoken | 9 | JWT auth tokens |
-| bcryptjs | 2 | Password hashing |
-| express-rate-limit | 7 | API rate limiting |
+| Package | Purpose |
+|---|---|
+| Node 24 + Express 5 | HTTP API |
+| Drizzle ORM | Type-safe PostgreSQL |
+| Clerk (`@clerk/express`) | JWT auth middleware |
+| pino + pino-http | Structured logging |
+| zod | Runtime validation |
+| SSE | Streaming responses |
+
+### Infrastructure
+| Service | Role |
+|---|---|
+| Render | Hosts API + built SPA (single web service) |
+| Neon | PostgreSQL (free tier, pooled) |
+| Groq | LLM inference |
+| Clerk | Auth (user management, OAuth, SSO) |
 
 ---
 
 ## 💻 Local Development
 
 ### Prerequisites
-- Node.js 20+ and pnpm 9+
-- PostgreSQL 15+ (or use the Replit built-in DB)
+- Node.js 20+ and pnpm (v11 recommended)
+- A `.env` file with the keys below (copy values from Render or ask for them)
 
-### 1. Clone & Install
+### 1. Install
 ```bash
-git clone https://github.com/your-username/medai.git
-cd medai
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
-### 2. Environment Setup
+### 2. Start (Windows)
 ```bash
-cp .env.example .env
-# Fill in your values (see Environment Variables section below)
+.\start_dev.ps1
 ```
+- API server → `http://localhost:5000`
+- Frontend (Vite) → `http://localhost:3000`
+- Health check → `http://localhost:5000/api/healthz`
 
-### 3. Database Setup
+### 3. Build & run manually
 ```bash
-# Push schema to your database
-pnpm --filter @workspace/db run push
-```
+# Build both workspaces
+pnpm run build
 
-### 4. Run Development Servers
-```bash
-# Terminal 1 — API server (port 8080)
-pnpm --filter @workspace/api-server run dev
-
-# Terminal 2 — Frontend (port 24185)
-pnpm --filter @workspace/medical-ai run dev
-```
-
-The frontend will be available at `http://localhost:24185`.
-
-### 5. Code Generation (when OpenAPI spec changes)
-```bash
-pnpm --filter @workspace/api-spec run codegen
+# Start the API (serves the built SPA too)
+cd artifacts/api-server && pnpm start
 ```
 
 ---
@@ -200,164 +169,84 @@ pnpm --filter @workspace/api-spec run codegen
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | ✅ | PostgreSQL connection string |
-| `SESSION_SECRET` | ✅ | JWT signing secret (min 32 chars) |
-| `AI_INTEGRATIONS_OPENAI_BASE_URL` | ✅ (AI features) | OpenAI-compatible base URL |
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | ✅ (AI features) | OpenAI API key |
-| `NODE_ENV` | ⬜ | `development` or `production` |
-| `PORT` | ⬜ | API server port (default: 8080) |
-| `LOG_LEVEL` | ⬜ | Pino log level (default: `info`) |
-
-```bash
-# .env.example
-DATABASE_URL=postgresql://user:password@localhost:5432/medai
-SESSION_SECRET=your-super-secret-jwt-key-at-least-32-characters
-NODE_ENV=development
-PORT=8080
-```
+| `DATABASE_URL` | ✅ | Neon/Postgres connection string |
+| `GROQ_API_KEY` | ✅ | Groq API key (LLM inference) |
+| `CLERK_SECRET_KEY` | ✅ | Clerk secret (`sk_test_...` dev / `sk_live_...` prod) |
+| `CLERK_PUBLISHABLE_KEY` | ✅ | Clerk publishable key (backend) |
+| `VITE_CLERK_PUBLISHABLE_KEY` | ✅ | Clerk publishable key (frontend bundle) |
+| `PORT` | ⬜ | API port (default `5000`) |
+| `BASE_PATH` | ⬜ | URL base path (default `/`) |
+| `NODE_ENV` | ⬜ | `development` / `production` |
+| `DEV_AUTH_USER_ID` | ⬜ | **Dev-only** auth bypass (never in production) |
+| `OPENAI_API_KEY` | ⬜ | Only if using OpenAI embeddings for RAG |
+| `GOOGLE_HEALTH_*` | ⬜ | Optional Google Health Connect OAuth |
 
 ---
 
 ## 🚀 Deployment
 
-### Option 1: Replit (Recommended — One Click)
-This project is optimized for Replit deployment with built-in PostgreSQL.
+Live at **https://medibot-core.onrender.com** — a single Render Web Service that:
+1. Builds both workspaces (`artifacts/medical-ai` → `dist/public`, `artifacts/api-server` → `dist/index.mjs`)
+2. Starts `node artifacts/api-server/dist/index.mjs`
 
-1. Fork this Replit
-2. Set environment variables in the Secrets panel
-3. Click **Deploy** → the reverse proxy, HTTPS, and health checks are configured automatically
-
-### Option 2: Vercel (Frontend) + Railway (Backend)
-
-**Frontend — Vercel**
+**Build command (Render):**
 ```bash
-# vercel.json is pre-configured
-vercel deploy --prod
+npx --yes pnpm@11.17.0 install --frozen-lockfile && npx --yes pnpm@11.17.0 run build
 ```
-Set build settings:
-- Framework Preset: `Vite`
-- Root Directory: `artifacts/medical-ai`
-- Build Command: `pnpm --filter @workspace/medical-ai run build`
-- Output Directory: `artifacts/medical-ai/dist`
+**Start command:** `node artifacts/api-server/dist/index.mjs`
 
-**Backend — Railway / Render**
-```bash
-# Build command
-pnpm --filter @workspace/api-server run build
-
-# Start command
-node artifacts/api-server/dist/index.mjs
-```
-Add all environment variables from the table above.
-
-**Database — Neon / Supabase / Railway**
-```bash
-# After provisioning, run migrations
-DATABASE_URL=your-url pnpm --filter @workspace/db run push
-```
+Push to `main` → Render auto-rebuilds. Full guide with env vars, Clerk production setup, and cold-start mitigation (UptimeRobot): **[DEPLOY.md](./DEPLOY.md)**.
 
 ---
 
-## 📡 API Reference
+## 📡 Key API Endpoints
 
-### Health
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/healthz` | Server health check |
+| `GET` | `/api/healthz` | Health check |
+| `POST` | `/api/conversations` | Create conversation |
+| `POST` | `/api/conversations/:id/messages` | Send message (SSE stream) |
+| `GET` | `/api/memory/history-summary` | Aggregated medical history |
+| `GET` | `/api/memory/timeline` | Health timeline |
+| `POST` | `/api/memory/resolved-conditions` | Mark condition as solved |
+| `GET` | `/api/dashboard/overview` | Dashboard overview |
+| `GET` | `/api/safety/summary` | Safety evaluation summary |
+| `GET` | `/api/wellness/overview` | Wellness score |
 
-### Authentication *(planned)*
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/signup` | Create account |
-| `POST` | `/api/auth/login` | Get JWT token |
-| `GET` | `/api/auth/me` | Get current user |
-
-### Conversations *(planned)*
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/openai/conversations` | List all conversations |
-| `POST` | `/api/openai/conversations` | Create conversation |
-| `GET` | `/api/openai/conversations/:id` | Get with messages |
-| `DELETE` | `/api/openai/conversations/:id` | Delete conversation |
-| `POST` | `/api/openai/conversations/:id/messages` | Send message (SSE stream) |
+All `/api/*` routes require Clerk auth (except `/api/healthz`).
 
 ---
 
-## 🧪 Type Checking
+## 🧪 Testing & Verification
 
 ```bash
-# Full typecheck (libs first, then leaf packages)
+# Typecheck both workspaces
 pnpm run typecheck
 
-# Single package
-pnpm --filter @workspace/medical-ai run typecheck
-pnpm --filter @workspace/api-server run typecheck
+# End-to-end API suite (local API running): image upload, streaming, vision, persistence, delete
+node artifacts/api-server/e2e_test.mjs
 ```
 
----
-
-## 📁 Component Map
-
-### Chat Components (`src/components/chat/`)
-| Component | Description |
-|---|---|
-| `ChatMessage` | Message bubble with avatar, copy/feedback on hover |
-| `MarkdownContent` | Inline markdown parser (bold, italic, code, bullets, blockquotes) |
-| `TypingIndicator` | 3-dot pulse animation with radiating avatar ring |
-| `SuggestionChips` | Horizontal-scroll quick-action chips |
-| `EmptyState` | Welcome screen with 4 quick-action cards |
-| `MessageSkeleton` | Shimmer loading state |
-| `ChatInput` | Auto-resize textarea + voice/attach/send buttons |
-| `ChatSidebar` | Grouped history, search, hover-delete |
-
-### Dashboard Components (`src/components/dashboard/`)
-| Component | Description |
-|---|---|
-| `HealthOverviewCards` | 4 animated metric cards with CountUp |
-| `HealthTrendsChart` | Tabbed AreaChart / BarChart (4 metrics) |
-| `RiskAnalysisChart` | RadarChart + animated risk progress bars |
-| `VitalsPanel` | 6 vitals with animated fill bars |
-| `SymptomCheckerWidget` | Multi-select → AI severity assessment |
-| `MedicationLookup` | Searchable cards + expand for interactions |
-| `HealthReports` | AI-generated report cards with trends |
-| `EmergencySuggestions` | 3-tier triage guide + medical disclaimer |
-
----
-
-## 🎨 Design System
-
-**Color Palette**
-```
-Primary (Teal):     hsl(183, 100%, 45%)   #00b8d9
-Background (Dark):  hsl(222, 47%, 7%)     #090e1a
-Card:               hsl(222, 47%, 9%)     #0d1425
-Muted:              hsl(215, 20%, 65%)    #94a3b8
-```
-
-**Typography:** Inter (Google Fonts) — 300/400/500/600/700/800
-
-**Radius:** 8px base (`--radius: 0.5rem`) → `rounded-xl` (12px), `rounded-2xl` (16px)
+Verified flows: multimodal streaming, image upload/retrieval, text-only streaming, conversation persistence, and the full **Solved / Undo** medical-history flow (regression-tested against the render-crash bug).
 
 ---
 
 ## 🔒 Security
 
-- JWT tokens signed with `SESSION_SECRET` (HS256)
-- Passwords hashed with bcryptjs (12 rounds)
-- Rate limiting: 100 req/15min general, 10 req/15min auth routes
-- Authorization headers and cookies auto-redacted from logs (pino)
-- Query strings stripped from access logs to prevent token leakage
-- CORS configured per environment
-- Input validated with Zod on every route (server-side)
+- Clerk JWT auth on every `/api/*` route (`@clerk/express`)
+- Clinical safety pipeline blocks dangerous advice before it reaches patients
+- pino logs redact auth headers/query strings
+- pnpm `minimumReleaseAge` supply-chain protection
+- Secrets stored in env vars — never committed
 
 ---
 
 ## 📜 License
 
-MIT © 2026 — Built with ❤️ using Replit
+MIT © 2026
 
 ---
 
 <div align="center">
-  <sub>MedAI is for informational purposes only. Not a substitute for professional medical advice.</sub>
+  <sub>MediBot-Core is for informational purposes only. Not a substitute for professional medical advice.</sub>
 </div>

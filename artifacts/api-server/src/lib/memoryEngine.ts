@@ -234,6 +234,7 @@ export async function filterMemoryByDiagnosis(
 export interface MedicalHistorySummary {
   activeConditions: { name: string; firstRecorded: string; lastRecorded: string; count: number }[];
   pastConditions: { name: string; firstRecorded: string; lastRecorded: string }[];
+  resolvedConditions: ResolvedConditionEntry[];
   allergies: string[];
   currentMedications: string[];
   medicationHistory: string[];
@@ -388,6 +389,7 @@ export async function getMedicalHistorySummary(userId: string): Promise<MedicalH
   return {
     activeConditions: activeConditions.sort((a, b) => b.count - a.count),
     pastConditions,
+    resolvedConditions,
     allergies: [...allergySet].sort(),
     currentMedications: [...medicationSet].sort(),
     medicationHistory: [...medicationSet].sort(),

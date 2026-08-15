@@ -178,7 +178,7 @@ export function MedicalHistoryDashboard() {
           {data.pastConditions.length > 0 ? (
             <div className="space-y-1">
               {data.pastConditions.slice(0, 5).map((c, i) => {
-                const resolved = data.resolvedConditions.find(
+                const resolved = (data.resolvedConditions ?? []).find(
                   (r) => r.conditionName.toLowerCase() === c.name.toLowerCase(),
                 );
                 return (

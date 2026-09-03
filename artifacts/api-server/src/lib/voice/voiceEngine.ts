@@ -11,13 +11,9 @@ import { assessConfidence } from "../confidenceEngine";
 import { SafetyFramework } from "../safety/framework";
 import { AnalyticsCollector } from "../observability/analyticsCollector";
 import { ProviderComparator } from "../observability/providerComparator";
-import OpenAI from "openai";
 import { sql } from "drizzle-orm";
+import { llm, getModelConfig } from "../llm";
 import type { VoiceSession, VoiceTranscript, ServerMessage, VoiceEngineState, VoiceSessionStatus } from "./types";
-
-const groq = process.env.GROQ_API_KEY
-  ? new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: "https://api.groq.com/openai/v1" })
-  : null;
 
 const CHAT_MODEL = "openai/gpt-oss-120b";
 
@@ -160,22 +156,16 @@ export class VoiceEngine {
   }
 
   private async callLLM(systemContent: string, messages: { role: string; content: string }[]): Promise<string> {
-    if (!groq) return "I'm sorry, the AI service is not available right now. Please try again later.";
-
-    const completion = await groq.chat.completions.create({
-      model: CHAT_MODEL,
-      messages: [
-        { role: "system", content: systemContent },
-        ...messages.map((m) => ({
-          role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
-          content: m.content,
-        })),
-      ],
+    const config = getModelConfig();
+    const result = await llm.generateText({
+      systemPrompt: systemContent,
+      userContent: messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
+      model: config.chatModel,
       temperature: 0.7,
-      max_tokens: 1024,
+      maxTokens: 1024,
     });
 
-    return completion.choices[0]?.message?.content || "I'm not sure how to respond. Could you provide more details?";
+    return result.data ?? "I'm not sure how to respond. Could you provide more details?";
   }
 
   private async sendResponse(

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, jsonb, boolean, real } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, jsonb, boolean, real, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -19,7 +19,9 @@ export const healthInsightsTable = pgTable("health_insights", {
   isDismissed: boolean("is_dismissed").default(false),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("health_insights_user_id_idx").on(t.userId),
+}));
 
 export const wellnessGoalsTable = pgTable("wellness_goals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -40,7 +42,9 @@ export const wellnessGoalsTable = pgTable("wellness_goals", {
   isArchived: boolean("is_archived").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("wellness_goals_user_id_idx").on(t.userId),
+}));
 
 export const goalLogsTable = pgTable("goal_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -49,7 +53,10 @@ export const goalLogsTable = pgTable("goal_logs", {
   value: real("value"),
   note: text("note"),
   loggedAt: timestamp("logged_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("goal_logs_user_id_idx").on(t.userId),
+  goalIdIdx: index("goal_logs_goal_id_idx").on(t.goalId),
+}));
 
 export const preventiveRemindersTable = pgTable("preventive_reminders", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -63,7 +70,9 @@ export const preventiveRemindersTable = pgTable("preventive_reminders", {
   completedAt: timestamp("completed_at"),
   isDismissed: boolean("is_dismissed").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("preventive_reminders_user_id_idx").on(t.userId),
+}));
 
 export const notificationProvidersTable = pgTable("notification_providers", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -73,7 +82,9 @@ export const notificationProvidersTable = pgTable("notification_providers", {
   config: jsonb("config").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("notification_providers_user_id_idx").on(t.userId),
+}));
 
 export const insertHealthInsightSchema = createInsertSchema(healthInsightsTable).omit({ id: true, createdAt: true });
 export const selectHealthInsightSchema = createSelectSchema(healthInsightsTable);

@@ -14,6 +14,7 @@ import { PromptInjectionDefender } from "./validators/promptInjection";
 import { PrivacyProtector } from "./validators/privacyProtection";
 import { ConfidenceCalibrator } from "./validators/confidenceCalibration";
 import { ResponseQualityEvaluator } from "./validators/responseQuality";
+import { DiagnosticLanguageValidator } from "./validators/diagnosticLanguage";
 import { SafetyCache } from "./safetyCache";
 
 const DEFAULT_CONFIG: SafetyConfig = {
@@ -21,6 +22,7 @@ const DEFAULT_CONFIG: SafetyConfig = {
     { name: "clinical_safety", enabled: true, severity: "critical", action: "block" },
     { name: "hallucination_detector", enabled: true, severity: "high", action: "rewrite" },
     { name: "medical_consistency", enabled: true, severity: "high", action: "rewrite" },
+    { name: "diagnostic_language", enabled: true, severity: "high", action: "rewrite" },
     { name: "guideline_compliance", enabled: true, severity: "medium", action: "warn" },
     { name: "prompt_injection", enabled: true, severity: "critical", action: "block" },
     { name: "privacy_protection", enabled: true, severity: "critical", action: "block" },
@@ -43,6 +45,7 @@ export class SafetyFramework {
     this.register(new ClinicalSafetyValidator());
     this.register(new HallucinationDetector());
     this.register(new MedicalConsistencyChecker());
+    this.register(new DiagnosticLanguageValidator());
     this.register(new GuidelineComplianceChecker());
     this.register(new PromptInjectionDefender());
     this.register(new PrivacyProtector());

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -18,7 +18,10 @@ export const healthReportsTable = pgTable("health_reports", {
   version: integer("version").default(1),
   reportDate: timestamp("report_date").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("health_reports_user_id_idx").on(t.userId),
+  userIdReportDateIdx: index("health_reports_user_id_report_date_idx").on(t.userId, t.reportDate),
+}));
 
 const baseInsert = createInsertSchema(healthReportsTable).omit({
   id: true,

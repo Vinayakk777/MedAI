@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
+import { requireAdmin } from "../middlewares/requireAdmin";
 import { db, knowledgeSourcesTable, medicalDocumentsTable, documentChunksTable, retrievalLogsTable, citationRecordsTable } from "@workspace/db";
 import { eq, desc, and, sql, count } from "drizzle-orm";
 import { createEmbedder } from "../lib/rag/embeddings/embedder";
@@ -13,7 +13,7 @@ const router: IRouter = Router();
 
 // ─── Health check ───
 
-router.get("/rag-admin/health", requireAuth, async (_req, res) => {
+router.get("/rag-admin/health", requireAdmin, async (_req, res) => {
   try {
     const engine = getRagEngine();
     await engine.ensureSetup();
@@ -25,7 +25,7 @@ router.get("/rag-admin/health", requireAuth, async (_req, res) => {
 
 // ─── Stats ───
 
-router.get("/rag-admin/stats", requireAuth, async (_req, res) => {
+router.get("/rag-admin/stats", requireAdmin, async (_req, res) => {
   try {
     const pipeline = new IngestionPipeline(createEmbedder());
     const docStats = await pipeline.getDocumentStats();
@@ -59,7 +59,7 @@ router.get("/rag-admin/stats", requireAuth, async (_req, res) => {
 
 // ─── Knowledge Sources ───
 
-router.get("/rag-admin/sources", requireAuth, async (_req, res) => {
+router.get("/rag-admin/sources", requireAdmin, async (_req, res) => {
   try {
     const sources = await db
       .select()
@@ -71,7 +71,7 @@ router.get("/rag-admin/sources", requireAuth, async (_req, res) => {
   }
 });
 
-router.post("/rag-admin/sources", requireAuth, async (req, res) => {
+router.post("/rag-admin/sources", requireAdmin, async (req, res) => {
   const { slug, name, organization, description, website, sourceType } = req.body;
   if (!slug || !name || !organization) {
     res.status(400).json({ error: "slug, name, and organization are required" });
@@ -88,7 +88,7 @@ router.post("/rag-admin/sources", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/rag-admin/sources/:id", requireAuth, async (req, res) => {
+router.patch("/rag-admin/sources/:id", requireAdmin, async (req, res) => {
   const id = String(req.params.id);
   const updates: Record<string, unknown> = {};
   for (const key of ["slug", "name", "organization", "description", "website", "isActive", "sourceType"]) {
@@ -108,7 +108,7 @@ router.patch("/rag-admin/sources/:id", requireAuth, async (req, res) => {
 
 // ─── Documents ───
 
-router.get("/rag-admin/documents", requireAuth, async (req, res) => {
+router.get("/rag-admin/documents", requireAdmin, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 200);
   const offset = Number(req.query.offset) || 0;
 
@@ -134,7 +134,7 @@ router.get("/rag-admin/documents", requireAuth, async (req, res) => {
 
 // ─── Ingest a document ───
 
-router.post("/rag-admin/ingest", requireAuth, async (req, res) => {
+router.post("/rag-admin/ingest", requireAdmin, async (req, res) => {
   const { title, organization, sourceId, content, category, documentType, publicationDate, version, tags, chunkerName, maxChunkSize, chunkOverlap } = req.body;
 
   if (!title || !organization || !content) {
@@ -171,7 +171,7 @@ router.post("/rag-admin/ingest", requireAuth, async (req, res) => {
 
 // ─── Re-index ───
 
-router.post("/rag-admin/reindex/:documentId", requireAuth, async (req, res) => {
+router.post("/rag-admin/reindex/:documentId", requireAdmin, async (req, res) => {
   const documentId = String(req.params.documentId);
   try {
     const embedder = createEmbedder();
@@ -189,7 +189,7 @@ router.post("/rag-admin/reindex/:documentId", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/rag-admin/reindex-all", requireAuth, async (req, res) => {
+router.post("/rag-admin/reindex-all", requireAdmin, async (req, res) => {
   try {
     const embedder = createEmbedder();
     const pipeline = new IngestionPipeline(embedder);
@@ -204,7 +204,7 @@ router.post("/rag-admin/reindex-all", requireAuth, async (req, res) => {
 
 // ─── Delete document ───
 
-router.delete("/rag-admin/documents/:id", requireAuth, async (req, res) => {
+router.delete("/rag-admin/documents/:id", requireAdmin, async (req, res) => {
   const id = String(req.params.id);
   try {
     const embedder = createEmbedder();
@@ -219,7 +219,7 @@ router.delete("/rag-admin/documents/:id", requireAuth, async (req, res) => {
 
 // ─── Provider info ───
 
-router.get("/rag-admin/providers", requireAuth, async (_req, res) => {
+router.get("/rag-admin/providers", requireAdmin, async (_req, res) => {
   const providers = getAllProviders();
   res.json(providers.map((p) => ({
     slug: p.slug,
@@ -231,21 +231,21 @@ router.get("/rag-admin/providers", requireAuth, async (_req, res) => {
 
 // ─── Chunkers info ───
 
-router.get("/rag-admin/chunkers", requireAuth, async (_req, res) => {
+router.get("/rag-admin/chunkers", requireAdmin, async (_req, res) => {
   const chunkers = getAllChunkers();
   res.json(chunkers.map((c) => ({ name: c.name })));
 });
 
 // ─── Clear cache ───
 
-router.post("/rag-admin/clear-cache", requireAuth, async (_req, res) => {
+router.post("/rag-admin/clear-cache", requireAdmin, async (_req, res) => {
   ragCache.invalidate();
   res.json({ success: true });
 });
 
 // ─── Refresh embeddings for all chunks ───
 
-router.post("/rag-admin/refresh-embeddings", requireAuth, async (req, res) => {
+router.post("/rag-admin/refresh-embeddings", requireAdmin, async (req, res) => {
   try {
     const embedder = createEmbedder();
     const pipeline = new IngestionPipeline(embedder);
@@ -260,7 +260,7 @@ router.post("/rag-admin/refresh-embeddings", requireAuth, async (req, res) => {
 
 // ─── Retrieval quality stats ───
 
-router.get("/rag-admin/quality", requireAuth, async (_req, res) => {
+router.get("/rag-admin/quality", requireAdmin, async (_req, res) => {
   try {
     const [totalRetrievals] = await db
       .select({ value: count() })

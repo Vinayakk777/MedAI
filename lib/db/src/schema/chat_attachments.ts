@@ -4,6 +4,7 @@ import {
   timestamp,
   uuid,
   integer,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -33,7 +34,9 @@ export const chatAttachmentsTable = pgTable("chat_attachments", {
   width: integer("width"),
   height: integer("height"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("chat_attachments_user_id_idx").on(t.userId),
+}));
 
 export const insertChatAttachmentSchema =
   createInsertSchema(chatAttachmentsTable).omit({

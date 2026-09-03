@@ -89,7 +89,7 @@ export class IngestionPipeline {
       }
     }
 
-    // Insert chunks
+    // Insert chunks with enriched metadata
     const validRecords = chunkRecords.filter((r) => r.embedding.length === this.embedder.dimensions);
     if (validRecords.length > 0) {
       await db.insert(documentChunksTable).values(
@@ -103,7 +103,16 @@ export class IngestionPipeline {
           heading: r.chunk.heading ?? null,
           wordCount: r.chunk.wordCount,
           embedding: r.embedding,
-          metadata: (r.chunk.metadata ?? {}) as Record<string, unknown>,
+          metadata: {
+            ...(r.chunk.metadata ?? {}),
+            // Enrich with context metadata for retrieval filtering
+            category: params.category ?? "general",
+            documentType: params.documentType ?? "text",
+            organization: params.organization,
+            sourceType: params.metadata?.sourceType ?? "uploaded",
+            chunkPosition: r.chunk.index / Math.max(chunks.length - 1, 1),
+            totalChunks: chunks.length,
+          } as Record<string, unknown>,
           tags: params.tags ?? [],
         })),
       );

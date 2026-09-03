@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, jsonb, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -78,7 +78,10 @@ export const medicalMemoryTable = pgTable("medical_memory", {
   isDeleted: boolean("is_deleted").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("medical_memory_user_id_idx").on(t.userId),
+  userIdConsultationIdx: index("medical_memory_user_id_consultation_idx").on(t.userId, t.consultationDate),
+}));
 
 export const insertMedicalMemorySchema = createInsertSchema(medicalMemoryTable).omit({
   id: true,

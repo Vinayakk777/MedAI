@@ -333,7 +333,14 @@ Uncertainty: ${state.confidence.remainingUncertainty}
   }
 
   if (state.ragEvidence) {
-    sections.push(state.ragEvidence);
+    sections.push(`${state.ragEvidence}
+
+When using the above medical evidence:
+- Cite sources by name (e.g., "According to [Source 1]..." or "As reported by [Source name]...")
+- Prioritize HIGH confidence evidence over MODERATE and LOW
+- Synthesize evidence rather than listing each passage verbatim
+- If evidence contradicts the clinical assessment, acknowledge the discrepancy
+- Always clarify when evidence is from general guidelines vs. patient-specific data`);
   }
 
   if (state.relevantMemories) {

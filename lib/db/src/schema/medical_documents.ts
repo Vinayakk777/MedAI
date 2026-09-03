@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, real, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, real, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -60,7 +60,10 @@ export const docUploadsTable = pgTable("medical_documents", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
-});
+}, (t) => ({
+  userIdx: index("medical_documents_user_id_idx").on(t.userId),
+  userIdStatusIdx: index("medical_documents_user_id_status_idx").on(t.userId, t.status),
+}));
 
 export const insertDocUploadSchema = createInsertSchema(docUploadsTable).omit({
   id: true, createdAt: true, updatedAt: true, deletedAt: true,

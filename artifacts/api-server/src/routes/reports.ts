@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { healthReportsTable, conversationsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 import { generateReport, generateReportSummary } from "../lib/reportEngine";
 import { generateConsultationPDF } from "../lib/pdfGenerator";
@@ -17,12 +17,23 @@ const router: IRouter = Router();
 router.get("/reports", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(healthReportsTable)
       .where(eq(healthReportsTable.userId, userId))
-      .orderBy(desc(healthReportsTable.reportDate));
-    res.json(rows);
+      .orderBy(desc(healthReportsTable.reportDate))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(healthReportsTable)
+      .where(eq(healthReportsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list reports failed");
     res.status(500).json({ error: "Failed to fetch reports" });

@@ -1,8 +1,10 @@
 export { SafetyFramework } from "./framework";
 export { SafetyCache } from "./safetyCache";
+export { classifyQueryRisk, buildHighRiskPrefix, buildInsufficientInfoResponse } from "./queryClassifier";
 export { ClinicalSafetyValidator } from "./validators/clinicalSafety";
 export { HallucinationDetector } from "./validators/hallucinationDetector";
 export { MedicalConsistencyChecker } from "./validators/medicalConsistency";
+export { DiagnosticLanguageValidator } from "./validators/diagnosticLanguage";
 export { GuidelineComplianceChecker } from "./validators/guidelineCompliance";
 export { PromptInjectionDefender } from "./validators/promptInjection";
 export { PrivacyProtector } from "./validators/privacyProtection";

@@ -3,6 +3,9 @@ export { RagCache, ragCache } from "./cache";
 export { IngestionPipeline } from "./ingestion/pipeline";
 export { HybridSearchEngine } from "./retrieval/hybridSearch";
 export { SimpleReRanker, DiversityReRanker } from "./retrieval/reRanker";
+export { LLMReRanker } from "./retrieval/llmReRanker";
+export { QueryRewriter } from "./retrieval/queryRewriter";
+export { ContextSelector } from "./retrieval/contextSelector";
 export { CitationEngine } from "./retrieval/citationEngine";
 export { PgVectorStore } from "./vector-store/pgVectorStore";
 export { BaseVectorStore } from "./vector-store/vectorStore";
@@ -25,6 +28,7 @@ export type {
   ReRanker, ReRankedResult,
   CitationEvidence, CitationGroup,
   RagQuery, RagResponse, PipelineStage,
+  PipelineMetrics,
   IngestionResult,
   RetrievalLogEntry,
   CacheEntry,

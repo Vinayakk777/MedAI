@@ -26,9 +26,10 @@ export class HybridSearchEngine {
     const minScore = params.minScore ?? 0.3;
 
     // Run semantic and keyword searches in parallel
+    // Both now accept metadata filters for targeted retrieval
     const [semanticResults, keywordResults] = await Promise.all([
       this.semanticSearch(params.query, topK * 2, params.filters),
-      this.keywordSearch(params.query, topK * 2),
+      this.keywordSearch(params.query, topK * 2, params.filters),
     ]);
 
     // Merge results
@@ -95,6 +96,7 @@ export class HybridSearchEngine {
   private async keywordSearch(
     query: string,
     topK: number,
+    filters?: VectorSearchQuery["filters"],
   ): Promise<Array<{ chunkId: string; documentId: string; sourceId?: string; content: string; contentPreview?: string; section?: string; heading?: string; score: number; metadata?: Record<string, unknown> }>> {
     const terms = query
       .replace(/[^a-zA-Z0-9\s]/g, " ")
@@ -103,6 +105,28 @@ export class HybridSearchEngine {
       .map((t) => t.toLowerCase());
 
     if (terms.length === 0) return [];
+
+    // Build metadata filter conditions for SQL WHERE clause
+    const metadataConditions: string[] = [];
+    if (filters && filters.length > 0) {
+      for (const filter of filters) {
+        if (filter.operator === "eq" && typeof filter.value === "string") {
+          // Support filtering by metadata fields stored as JSONB
+          metadataConditions.push(
+            `dc.metadata->>'${filter.field}' = '${filter.value}'`
+          );
+        } else if (filter.operator === "in" && Array.isArray(filter.value)) {
+          const vals = filter.value.map((v) => `'${v}'`).join(",");
+          metadataConditions.push(
+            `dc.metadata->>'${filter.field}' IN (${vals})`
+          );
+        }
+      }
+    }
+
+    const metadataWhere = metadataConditions.length > 0
+      ? ` AND ${metadataConditions.join(" AND ")}`
+      : "";
 
     try {
       const tsquery = terms
@@ -122,6 +146,7 @@ export class HybridSearchEngine {
           ts_rank(to_tsvector('english', dc.content), to_tsquery('english', ${tsquery})) as rank
         FROM document_chunks dc
         WHERE to_tsvector('english', dc.content) @@ to_tsquery('english', ${tsquery})
+        ${sql.raw(metadataWhere)}
         ORDER BY rank DESC
         LIMIT ${topK}
       `);

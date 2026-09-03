@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
+import { requireAdmin } from "../middlewares/requireAdmin";
 import { db, userFeedbackTable, consultationAnalyticsTable, aiQualityMetricsTable, providerCallLogsTable, promptVersionsTable, evaluationRunsTable, evaluationResultsTable, alertConfigsTable, alertEventsTable, auditLogsTable, anonymizedEventsTable } from "@workspace/db";
 import { eq, and, desc, gte, lte, count, sql } from "drizzle-orm";
 import { AnalyticsCollector } from "../lib/observability/analyticsCollector";
@@ -111,7 +112,7 @@ router.put("/observability/feedback/:id/resolve", requireAuth, async (req: AuthR
 //  QUALITY
 // ─────────────────────────────────────────────
 
-router.get("/observability/quality/dashboard", requireAuth, async (_req, res) => {
+router.get("/observability/quality/dashboard", requireAdmin, async (_req, res) => {
   try {
     const metrics = await quality.getDashboardMetrics();
     res.json(metrics);
@@ -120,7 +121,7 @@ router.get("/observability/quality/dashboard", requireAuth, async (_req, res) =>
   }
 });
 
-router.get("/observability/quality/history", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/quality/history", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const resolution = (req.query.resolution as string) || "daily";
     const days = parseInt(req.query.days as string) || 30;
@@ -135,7 +136,7 @@ router.get("/observability/quality/history", requireAuth, async (req: AuthReques
 //  PROVIDERS
 // ─────────────────────────────────────────────
 
-router.get("/observability/providers/comparison", requireAuth, async (_req, res) => {
+router.get("/observability/providers/comparison", requireAdmin, async (_req, res) => {
   try {
     const comparison = await providers.getProviderComparison();
     res.json(comparison);
@@ -144,7 +145,7 @@ router.get("/observability/providers/comparison", requireAuth, async (_req, res)
   }
 });
 
-router.get("/observability/providers/logs", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/providers/logs", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const offset = parseInt(req.query.offset as string) || 0;
@@ -169,7 +170,7 @@ router.get("/observability/providers/recommended", requireAuth, async (req: Auth
 //  PROMPTS
 // ─────────────────────────────────────────────
 
-router.get("/observability/prompts", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/prompts", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const name = req.query.name as string;
     if (!name) {
@@ -186,7 +187,7 @@ router.get("/observability/prompts", requireAuth, async (req: AuthRequest, res) 
   }
 });
 
-router.get("/observability/prompts/active", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/prompts/active", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const name = req.query.name as string;
     if (!name) { res.status(400).json({ error: "name query param required" }); return; }
@@ -197,7 +198,7 @@ router.get("/observability/prompts/active", requireAuth, async (req: AuthRequest
   }
 });
 
-router.post("/observability/prompts", requireAuth, async (req: AuthRequest, res) => {
+router.post("/observability/prompts", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const result = await prompts.createVersion({
       ...req.body,
@@ -210,7 +211,7 @@ router.post("/observability/prompts", requireAuth, async (req: AuthRequest, res)
   }
 });
 
-router.post("/observability/prompts/:id/activate", requireAuth, async (req: AuthRequest, res) => {
+router.post("/observability/prompts/:id/activate", requireAdmin, async (req: AuthRequest, res) => {
   try {
     await prompts.activateVersion(req.params.id as string, req.userId);
     await audit.log({ userId: req.userId, action: "prompt_activated", resourceType: "prompt_version", resourceId: req.params.id as string });
@@ -220,7 +221,7 @@ router.post("/observability/prompts/:id/activate", requireAuth, async (req: Auth
   }
 });
 
-router.post("/observability/prompts/rollback", requireAuth, async (req: AuthRequest, res) => {
+router.post("/observability/prompts/rollback", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { name, targetVersion } = req.body;
     await prompts.rollback(name, targetVersion, req.userId);
@@ -231,7 +232,7 @@ router.post("/observability/prompts/rollback", requireAuth, async (req: AuthRequ
   }
 });
 
-router.get("/observability/prompts/compare", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/prompts/compare", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { a, b } = req.query as { a: string; b: string };
     const diff = await prompts.compareVersions(a, b);
@@ -245,7 +246,7 @@ router.get("/observability/prompts/compare", requireAuth, async (req: AuthReques
 //  EVALUATIONS
 // ─────────────────────────────────────────────
 
-router.post("/observability/evaluations/run", requireAuth, async (req: AuthRequest, res) => {
+router.post("/observability/evaluations/run", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const pipeline = new EvaluationPipeline(async (scenario) => ({
       scenarioId: scenario.id,
@@ -270,7 +271,7 @@ router.post("/observability/evaluations/run", requireAuth, async (req: AuthReque
   }
 });
 
-router.get("/observability/evaluations/runs", requireAuth, async (_req, res) => {
+router.get("/observability/evaluations/runs", requireAdmin, async (_req, res) => {
   try {
     const pipeline = new EvaluationPipeline(async () => ({ scenarioId: "", passed: true }));
     const runs = await pipeline.getRunHistory();
@@ -280,7 +281,7 @@ router.get("/observability/evaluations/runs", requireAuth, async (_req, res) => 
   }
 });
 
-router.get("/observability/evaluations/runs/:id", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/evaluations/runs/:id", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const pipeline = new EvaluationPipeline(async () => ({ scenarioId: "", passed: true }));
     const detail = await pipeline.getRunDetail(req.params.id as string);
@@ -291,7 +292,7 @@ router.get("/observability/evaluations/runs/:id", requireAuth, async (req: AuthR
   }
 });
 
-router.get("/observability/evaluations/compare", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/evaluations/compare", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { a, b } = req.query as { a: string; b: string };
     const pipeline = new EvaluationPipeline(async () => ({ scenarioId: "", passed: true }));
@@ -306,7 +307,7 @@ router.get("/observability/evaluations/compare", requireAuth, async (req: AuthRe
 //  ALERTS
 // ─────────────────────────────────────────────
 
-router.get("/observability/alerts/configs", requireAuth, async (_req, res) => {
+router.get("/observability/alerts/configs", requireAdmin, async (_req, res) => {
   try {
     const configs = await alerts.getConfigs();
     res.json(configs);
@@ -315,7 +316,7 @@ router.get("/observability/alerts/configs", requireAuth, async (_req, res) => {
   }
 });
 
-router.post("/observability/alerts/configs", requireAuth, async (req: AuthRequest, res) => {
+router.post("/observability/alerts/configs", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const id = await alerts.createConfig(req.body);
     await audit.log({ userId: req.userId, action: "alert_modified", resourceType: "alert_config", resourceId: id });
@@ -325,7 +326,7 @@ router.post("/observability/alerts/configs", requireAuth, async (req: AuthReques
   }
 });
 
-router.put("/observability/alerts/configs/:id", requireAuth, async (req: AuthRequest, res) => {
+router.put("/observability/alerts/configs/:id", requireAdmin, async (req: AuthRequest, res) => {
   try {
     await alerts.updateConfig(req.params.id as string, req.body);
     res.json({ message: "Config updated" });
@@ -334,7 +335,7 @@ router.put("/observability/alerts/configs/:id", requireAuth, async (req: AuthReq
   }
 });
 
-router.delete("/observability/alerts/configs/:id", requireAuth, async (req: AuthRequest, res) => {
+router.delete("/observability/alerts/configs/:id", requireAdmin, async (req: AuthRequest, res) => {
   try {
     await alerts.deleteConfig(req.params.id as string);
     res.json({ message: "Config deleted" });
@@ -343,7 +344,7 @@ router.delete("/observability/alerts/configs/:id", requireAuth, async (req: Auth
   }
 });
 
-router.get("/observability/alerts/history", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/alerts/history", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
     const offset = parseInt(req.query.offset as string) || 0;
@@ -355,7 +356,7 @@ router.get("/observability/alerts/history", requireAuth, async (req: AuthRequest
   }
 });
 
-router.put("/observability/alerts/:id/resolve", requireAuth, async (req: AuthRequest, res) => {
+router.put("/observability/alerts/:id/resolve", requireAdmin, async (req: AuthRequest, res) => {
   try {
     await alerts.resolveAlert(req.params.id as string);
     res.json({ message: "Alert resolved" });
@@ -368,7 +369,7 @@ router.put("/observability/alerts/:id/resolve", requireAuth, async (req: AuthReq
 //  AUDIT LOGS
 // ─────────────────────────────────────────────
 
-router.get("/observability/admin/audit-logs", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/admin/audit-logs", requireAdmin, async (req: AuthRequest, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const offset = parseInt(req.query.offset as string) || 0;
@@ -381,7 +382,7 @@ router.get("/observability/admin/audit-logs", requireAuth, async (req: AuthReque
   }
 });
 
-router.get("/observability/admin/audit-summary", requireAuth, async (_req, res) => {
+router.get("/observability/admin/audit-summary", requireAdmin, async (_req, res) => {
   try {
     const summary = await audit.getAuditSummary();
     res.json(summary);
@@ -394,7 +395,7 @@ router.get("/observability/admin/audit-summary", requireAuth, async (_req, res) 
 //  DEVELOPER DASHBOARD
 // ─────────────────────────────────────────────
 
-router.get("/observability/admin/dashboard", requireAuth, async (_req, res) => {
+router.get("/observability/admin/dashboard", requireAdmin, async (_req, res) => {
   try {
     const [analyticsStats, feedbackSummary, qualityMetrics, providerComparison] = await Promise.all([
       analytics.getAggregatedStats(),

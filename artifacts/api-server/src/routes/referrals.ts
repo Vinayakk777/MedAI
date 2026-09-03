@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { referralsTable, conversationsTable, type Referral, type HandoffSummaryData } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 import {
   classifyCareLevel,
@@ -17,12 +17,23 @@ const router: IRouter = Router();
 router.get("/referrals", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(referralsTable)
       .where(and(eq(referralsTable.userId, userId), eq(referralsTable.isArchived, false)))
-      .orderBy(desc(referralsTable.createdAt));
-    res.json(rows);
+      .orderBy(desc(referralsTable.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(referralsTable)
+      .where(and(eq(referralsTable.userId, userId), eq(referralsTable.isArchived, false)));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list referrals failed");
     res.status(500).json({ error: "Failed to fetch referrals" });

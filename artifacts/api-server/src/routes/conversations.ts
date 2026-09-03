@@ -1,5 +1,4 @@
 import { Router, type IRouter } from "express";
-import OpenAI from "openai";
 import path from "path";
 import fs from "fs";
 import { db } from "@workspace/db";
@@ -11,7 +10,7 @@ import {
   type ChatAttachment,
   type MessageAttachment,
 } from "@workspace/db";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 import { IMAGE_ANALYSIS_SYSTEM_PROMPT } from "../lib/imageGuidance";
 import { analyzeSymptoms } from "../lib/symptomEngine";
@@ -45,15 +44,10 @@ import {
   type ConsultationState,
 } from "../lib/orchestrator";
 import { SafetyFramework } from "../lib/safety/framework";
+import { classifyQueryRisk, buildHighRiskPrefix, buildInsufficientInfoResponse } from "../lib/safety/queryClassifier";
+import { llm, getModelConfig } from "../lib/llm";
 import { AnalyticsCollector } from "../lib/observability/analyticsCollector";
 import { ProviderComparator } from "../lib/observability/providerComparator";
-
-const groq = process.env.GROQ_API_KEY
-  ? new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: "https://api.groq.com/openai/v1" })
-  : null;
-
-const CHAT_MODEL = "openai/gpt-oss-120b";
-const VISION_MODEL = "qwen/qwen3.6-27b";
 
 const MAX_ATTACHMENTS_PER_MESSAGE = 6;
 const chatImageDir = path.join(process.cwd(), "uploads", "chat-images");
@@ -104,12 +98,23 @@ const router: IRouter = Router();
 router.get("/conversations", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(conversationsTable)
       .where(eq(conversationsTable.userId, userId))
-      .orderBy(desc(conversationsTable.updatedAt));
-    res.json(rows);
+      .orderBy(desc(conversationsTable.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(conversationsTable)
+      .where(eq(conversationsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list conversations failed");
     res.status(500).json({ error: "Failed to fetch conversations" });
@@ -215,9 +220,8 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     res.status(400).json({ error: "message content or an attachment is required" });
     return;
   }
-  if (!groq) {
-
-    res.status(503).json({ error: "GROQ_API_KEY not configured" });
+  if (!llm.primary) {
+    res.status(503).json({ error: "No LLM providers configured (set GROQ_API_KEY or OPENAI_API_KEY)" });
     return;
   }
 
@@ -282,6 +286,75 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       history.map((m) => ({ role: m.role, content: m.content })),
     );
 
+    // ── Pipeline: Step 0 — Lightweight Risk Classification ──
+    // Runs BEFORE any LLM calls (<5ms). Categorizes query risk to enable
+    // early short-circuiting for emergencies and appropriate routing.
+    // See lib/safety/queryClassifier.ts for design rationale.
+    const riskClassification = content ? classifyQueryRisk(content) : null;
+    if (riskClassification) {
+      console.log(
+        `[conversations] risk classification: ${riskClassification.riskLevel} ` +
+        `(${riskClassification.matchedPatterns.join(", ") || "no patterns"})`
+      );
+    }
+
+    // Emergency short-circuit: if the classifier detects an emergency,
+    // skip all LLM calls and return a safety message immediately.
+    // This costs <5ms and ensures the user gets safety guidance instantly.
+    if (riskClassification?.shouldShortCircuit) {
+      const emergencyResponse = riskClassification.shortCircuitMessage ?? "Please seek immediate medical attention.";
+
+      // Still persist the user message and the AI response for record-keeping
+      const [aiMessage] = await db
+        .insert(messagesTable)
+        .values({
+          conversationId: id,
+          role: "assistant",
+          content: emergencyResponse,
+        })
+        .returning();
+
+      // Send the emergency response via SSE
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(`data: ${JSON.stringify({ content: emergencyResponse })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, userMessage, aiMessage })}\n\n`);
+      res.end();
+
+      console.log(`[conversations] emergency short-circuit (${riskClassification.reason})`);
+      return;
+    }
+
+    // Insufficient info: provide a clarifying response instead of guessing.
+    // This avoids wasting LLM compute on a query we can't safely answer.
+    if (riskClassification?.riskLevel === "insufficient" && content) {
+      const insufficientResponse = buildInsufficientInfoResponse(content);
+
+      const [aiMessage] = await db
+        .insert(messagesTable)
+        .values({
+          conversationId: id,
+          role: "assistant",
+          content: insufficientResponse,
+        })
+        .returning();
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(`data: ${JSON.stringify({ content: insufficientResponse })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, userMessage, aiMessage })}\n\n`);
+      res.end();
+
+      console.log(`[conversations] insufficient info short-circuit`);
+      return;
+    }
+
     // ── Pipeline: Step 1 — Symptom Analysis ──
     if (content) {
       try {
@@ -324,11 +397,18 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     // prevention, risk, triage, lab tests, memory, RAG) in the background AFTER the
     // stream completes. This keeps time-to-first-token fast instead of waiting for a
     // long chain of LLM calls that can be throttled by provider rate limits.
+    //
+    // For high-risk medical queries, prepend a safety prefix that forces
+    // the LLM to use uncertainty language and recommend professional consultation.
+    const highRiskPrefix = riskClassification?.riskLevel === "high_risk"
+      ? buildHighRiskPrefix()
+      : "";
     const systemContent =
+      highRiskPrefix +
       buildSystemPrompt(state) +
       (hasImages ? `\n\n${IMAGE_ANALYSIS_SYSTEM_PROMPT}` : "");
 
-    // Stream SSE response
+    // Stream SSE response via LLM provider abstraction
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -336,6 +416,8 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     res.flushHeaders();
 
     let fullResponse = "";
+    let streamUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    let streamErrorMsg: string | null = null;
 
     const historyForModel = history.map((m) => ({
       role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
@@ -355,22 +437,34 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     const streamController = new AbortController();
     const streamTimeout = setTimeout(() => streamController.abort(), 60_000);
 
-    let stream;
-    try {
-      stream = await groq.chat.completions.create({
-        model: hasImages ? VISION_MODEL : CHAT_MODEL,
-        messages: [
-          { role: "system", content: systemContent },
-          ...historyForModel,
-          { role: "user", content: userContent },
-        ],
-        stream: true,
-        ...(hasImages ? { reasoning_effort: "none" as never } : {}),
-      }, { signal: streamController.signal });
-    } catch (err) {
-      clearTimeout(streamTimeout);
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[conversations] OpenAI streaming call failed:", msg);
+    const config = getModelConfig();
+
+    await llm.streamChat({
+      systemPrompt: systemContent,
+      messages: [
+        ...historyForModel,
+        { role: "user", content: userContent as any },
+      ],
+      model: hasImages ? config.visionModel : config.chatModel,
+      signal: streamController.signal,
+      callbacks: {
+        onChunk: (chunk) => {
+          fullResponse += chunk.content;
+          res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
+        },
+        onDone: (_fullText, usage) => {
+          streamUsage = usage;
+        },
+        onError: (err) => {
+          streamErrorMsg = err instanceof Error ? err.message : String(err);
+        },
+      },
+    });
+
+    clearTimeout(streamTimeout);
+
+    if (streamErrorMsg) {
+      console.error("[conversations] streaming call failed:", streamErrorMsg);
       // Roll back the persisted user message so a retry does not duplicate it.
       try {
         await db.delete(messagesTable).where(eq(messagesTable.id, userMessage.id));
@@ -383,19 +477,9 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       } catch {
         // best-effort rollback
       }
-      res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: streamErrorMsg })}\n\n`);
       res.end();
       return;
-    }
-
-    clearTimeout(streamTimeout);
-
-    for await (const chunk of stream) {
-      const text = chunk.choices[0]?.delta?.content || "";
-      if (text) {
-        fullResponse += text;
-        res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
-      }
     }
 
     state.finalResponse = fullResponse;
@@ -688,15 +772,37 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
         }
 
         // ── Pipeline: Step 15b — RAG medical evidence retrieval ──
+        // Build a focused query for medical evidence retrieval.
+        // Strategy: prioritize the primary symptom + clinical profile,
+        // then add differential diagnoses as secondary context.
         if (!isEmergency) {
           try {
             const ragEngine = getRagEngine();
-            const queryText = [
-              state.symptomAnalysis?.primarySymptom?.normalized,
-              state.symptomAnalysis?.clinicalProfile,
-              ...(state.symptomAnalysis?.allSymptoms.map(s => s.normalized) ?? []),
-              ...(state.differentialDiagnosis?.conditions.map(c => c.name) ?? []),
-            ].filter(Boolean).join(" ").trim();
+
+            // Primary: symptom + clinical context (most relevant for retrieval)
+            const primaryParts: string[] = [];
+            if (state.symptomAnalysis?.primarySymptom?.normalized) {
+              primaryParts.push(state.symptomAnalysis.primarySymptom.normalized);
+            }
+            if (state.symptomAnalysis?.clinicalProfile) {
+              // Convert ClinicalProfile object to a searchable string
+              const cp = state.symptomAnalysis.clinicalProfile;
+              const profileParts = [
+                cp.age ? `age ${cp.age}` : "",
+                cp.gender ?? "",
+                ...(cp.medicalHistory ?? []),
+                ...(cp.currentMedications ?? []),
+              ].filter(Boolean);
+              if (profileParts.length > 0) {
+                primaryParts.push(profileParts.join(" "));
+              }
+            }
+
+            // Secondary: top differential diagnoses (for precision)
+            const diagnoses = state.differentialDiagnosis?.conditions
+              .slice(0, 3)
+              .map((c) => c.name) ?? [];
+            const queryText = [...primaryParts, ...diagnoses].filter(Boolean).join(" ").trim();
 
             if (queryText.length > 10) {
               const { evidenceBlock } = await ragEngine.formatEvidenceForPrompt({
@@ -798,10 +904,10 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
             userId,
             durationMs: Date.now() - conv.createdAt.getTime(),
             followUpCount: state.symptomAnalysis?.followUpQuestions?.length ?? 0,
-            tokensInput: 0,
-            tokensOutput: fullResponse.split(/\s+/).length * 2,
-            llmProvider: "groq",
-            llmModel: hasImages ? VISION_MODEL : CHAT_MODEL,
+            tokensInput: streamUsage.promptTokens,
+            tokensOutput: streamUsage.completionTokens,
+            llmProvider: llm.primary?.name ?? "groq",
+            llmModel: hasImages ? config.visionModel : config.chatModel,
             responseLatencyMs: 0,
             safetyInterventions: 0,
             confidenceScore: state.confidence?.confidenceScore ?? undefined,
@@ -813,12 +919,12 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
 
           const providerComparator = new ProviderComparator();
           await providerComparator.recordCall({
-            provider: "groq",
-            model: hasImages ? VISION_MODEL : CHAT_MODEL,
+            provider: llm.primary?.name ?? "groq",
+            model: hasImages ? config.visionModel : config.chatModel,
             taskType: "generation",
             latencyMs: 0,
-            tokensInput: 0,
-            tokensOutput: fullResponse.split(/\s+/).length * 2,
+            tokensInput: streamUsage.promptTokens,
+            tokensOutput: streamUsage.completionTokens,
             success: true,
           });
         } catch (obsErr) {

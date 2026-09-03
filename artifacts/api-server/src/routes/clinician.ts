@@ -157,6 +157,24 @@ router.post("/clinician/patients/unassign", requireAuth, requireClinician, requi
 router.get("/clinician/patients/:patientUserId/record", requireAuth, requireClinician, async (req: any, res) => {
   try {
     const patientUserId = req.params.patientUserId;
+    const clinicianId = req.clinicianProfile.id;
+
+    // Verify clinician is assigned to this patient (unless admin)
+    if (req.clinicianProfile.role !== "admin") {
+      const [assignment] = await db.select()
+        .from(patientAssignmentsTable)
+        .where(and(
+          eq(patientAssignmentsTable.clinicianId, clinicianId),
+          eq(patientAssignmentsTable.patientUserId, patientUserId),
+          eq(patientAssignmentsTable.isActive, true),
+        ))
+        .limit(1);
+
+      if (!assignment) {
+        res.status(403).json({ error: "You are not assigned to this patient" });
+        return;
+      }
+    }
 
     // Gather consultations
     const consultations = await db.select()

@@ -3,6 +3,18 @@ import { eq } from "drizzle-orm";
 import { CitationEvidence, CitationGroup, ReRankedResult } from "../types";
 import { RagQuery } from "../types";
 
+/**
+ * Citation Engine with Chunk-Level Provenance
+ *
+ * Builds structured citations from reranked results. Each citation includes:
+ * - Source document metadata (organization, title, publication date)
+ * - Chunk-level provenance (section, heading, position in document)
+ * - Confidence score based on rerank score + document recency
+ * - Evidence text snippet for LLM context
+ *
+ * The engine groups citations by organization for structured evidence
+ * presentation, and persists citations to the database for observability.
+ */
 export class CitationEngine {
   async buildCitations(
     results: ReRankedResult[],
@@ -20,6 +32,7 @@ export class CitationEngine {
             publicationDate: medicalDocumentsTable.publicationDate,
             version: medicalDocumentsTable.version,
             sourceId: medicalDocumentsTable.sourceId,
+            category: medicalDocumentsTable.category,
           })
           .from(medicalDocumentsTable)
           .where(eq(medicalDocumentsTable.isArchived, false))
@@ -28,7 +41,7 @@ export class CitationEngine {
 
     const docMap = new Map(docs.map((d) => [d.id, d]));
 
-    // Build citations from results
+    // Build citations from results with chunk-level provenance
     const citations: CitationEvidence[] = [];
     const seen = new Set<string>();
 
@@ -41,17 +54,25 @@ export class CitationEngine {
       seen.add(dedupKey);
 
       const confidence = this.calculateConfidence(result.reRankScore, doc);
+
+      // Enrich citation with chunk-level metadata
+      const chunkPosition = (result.metadata?.chunkPosition as number) ?? 0;
+      const totalChunks = (result.metadata?.totalChunks as number) ?? 1;
+      const positionContext = totalChunks > 1
+        ? ` [chunk ${Math.round(chunkPosition * totalChunks) + 1}/${totalChunks}]`
+        : "";
+
       citations.push({
         chunkId: result.chunkId,
         documentId: result.documentId,
         sourceId: result.sourceId,
         organization: doc.organization,
-        guidelineName: doc.title,
+        guidelineName: `${doc.title ?? "Untitled"}${positionContext}`,
         publicationDate: doc.publicationDate ?? undefined,
         evidenceText: result.content.slice(0, 500),
         confidence,
         relevanceScore: result.reRankScore,
-        section: result.section,
+        section: result.section ?? (result.heading ?? undefined),
       });
     }
 

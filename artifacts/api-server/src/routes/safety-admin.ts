@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
+import { requireAdmin, type AdminRequest } from "../middlewares/requireAdmin";
 import { db, safetyEvaluationsTable, safetyViolationsTable, hallucinationEventsTable, regressionTestRunsTable } from "@workspace/db";
 import { eq, desc, and, sql, count, gte } from "drizzle-orm";
 import { SafetyFramework } from "../lib/safety/framework";
@@ -20,7 +20,7 @@ function getFramework(): SafetyFramework {
 
 // ─── Get guardrail configuration ───
 
-router.get("/safety-admin/guardrails", requireAuth, async (_req, res) => {
+router.get("/safety-admin/guardrails", requireAdmin, async (_req, res) => {
   try {
     const framework = getFramework();
     res.json({
@@ -39,7 +39,7 @@ router.get("/safety-admin/guardrails", requireAuth, async (_req, res) => {
 
 // ─── Update guardrail configuration ───
 
-router.post("/safety-admin/guardrails", requireAuth, async (req: AuthRequest, res) => {
+router.post("/safety-admin/guardrails", requireAdmin, async (req: AdminRequest, res) => {
   try {
     const { name, enabled, severity, action, threshold } = req.body;
     if (!name) {
@@ -67,7 +67,7 @@ router.post("/safety-admin/guardrails", requireAuth, async (req: AuthRequest, re
 
 // ─── Run regression test suite ───
 
-router.post("/safety-admin/regression/run", requireAuth, async (req: AuthRequest, res) => {
+router.post("/safety-admin/regression/run", requireAdmin, async (req: AdminRequest, res) => {
   try {
     const { suiteName, scenarioIds } = req.body;
     const name = suiteName || "manual_regression_run";
@@ -123,7 +123,7 @@ router.post("/safety-admin/regression/run", requireAuth, async (req: AuthRequest
 
 // ─── Get regression test runs ───
 
-router.get("/safety-admin/regression/runs", requireAuth, async (_req, res) => {
+router.get("/safety-admin/regression/runs", requireAdmin, async (_req, res) => {
   try {
     const limit = Math.min(parseInt(_req.query.limit as string) || 20, 100);
 
@@ -140,7 +140,7 @@ router.get("/safety-admin/regression/runs", requireAuth, async (_req, res) => {
 
 // ─── Get regression test run detail ───
 
-router.get("/safety-admin/regression/runs/:id", requireAuth, async (req: AuthRequest, res) => {
+router.get("/safety-admin/regression/runs/:id", requireAdmin, async (req: AdminRequest, res) => {
   try {
     const [run] = await db.select()
       .from(regressionTestRunsTable)
@@ -160,7 +160,7 @@ router.get("/safety-admin/regression/runs/:id", requireAuth, async (req: AuthReq
 
 // ─── Get available test scenarios ───
 
-router.get("/safety-admin/regression/scenarios", requireAuth, async (_req, res) => {
+router.get("/safety-admin/regression/scenarios", requireAdmin, async (_req, res) => {
   try {
     const category = _req.query.category as string;
     const scenarios = category
@@ -181,7 +181,7 @@ router.get("/safety-admin/regression/scenarios", requireAuth, async (_req, res) 
 
 // ─── Global safety stats ───
 
-router.get("/safety-admin/stats", requireAuth, async (_req, res) => {
+router.get("/safety-admin/stats", requireAdmin, async (_req, res) => {
   try {
     const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const last7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

@@ -153,6 +153,20 @@ export interface CitationGroup {
   totalRelevance: number;
 }
 
+// ─── Pipeline Metrics ───
+
+export interface PipelineMetrics {
+  queryRewriteMs: number;
+  embeddingMs: number;
+  retrievalMs: number;
+  rerankMs: number;
+  contextSelectionMs: number;
+  totalChunksRetrieved: number;
+  chunksAfterDedup: number;
+  usedQueryRewrite: boolean;
+  usedLLMRerank: boolean;
+}
+
 // ─── RAG Engine ───
 
 export interface RagQuery {
@@ -163,6 +177,8 @@ export interface RagQuery {
   minConfidence?: "high" | "moderate" | "low";
   filters?: VectorFilter[];
   useCache?: boolean;
+  /** Force query rewriting even for short queries */
+  forceRewrite?: boolean;
 }
 
 export type PipelineStage =
@@ -177,6 +193,7 @@ export type PipelineStage =
 
 export interface RagResponse {
   query: string;
+  rewrittenQuery?: string;
   hasEvidence: boolean;
   evidenceGroups: CitationGroup[];
   citations: CitationEvidence[];
@@ -185,6 +202,8 @@ export interface RagResponse {
   pipelineStage: PipelineStage;
   latencyMs: number;
   wasFallback: boolean;
+  /** Pipeline performance metrics for observability */
+  metrics?: PipelineMetrics;
 }
 
 // ─── Ingestion ───

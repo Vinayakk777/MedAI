@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, real, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, real, boolean, integer, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -20,7 +20,9 @@ export const voiceSessionsTable = pgTable("voice_sessions", {
   startedAt: timestamp("started_at").defaultNow().notNull(),
   endedAt: timestamp("ended_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("voice_sessions_user_id_idx").on(t.userId),
+}));
 
 export const insertVoiceSessionSchema = createInsertSchema(voiceSessionsTable).omit({
   id: true, createdAt: true, startedAt: true,

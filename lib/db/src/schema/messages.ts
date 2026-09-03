@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, varchar, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, varchar, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { conversationsTable } from "./conversations";
@@ -23,7 +23,9 @@ export const messagesTable = pgTable("messages", {
   content: text("content").notNull(),
   attachments: jsonb("attachments").default([]).$type<MessageAttachment[]>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  conversationIdIdx: index("messages_conversation_id_idx").on(t.conversationId),
+}));
 
 export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
 

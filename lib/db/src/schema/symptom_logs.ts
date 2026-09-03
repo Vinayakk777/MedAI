@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -11,7 +11,10 @@ export const symptomLogsTable = pgTable("symptom_logs", {
   assessmentDescription: text("assessment_description"),
   assessmentAction: text("assessment_action"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("symptom_logs_user_id_idx").on(t.userId),
+  userIdCreatedIdx: index("symptom_logs_user_id_created_idx").on(t.userId, t.createdAt),
+}));
 
 export const insertSymptomLogSchema = createInsertSchema(symptomLogsTable).omit({
   id: true,

@@ -168,52 +168,62 @@ router.post("/medical-documents/:id/process", requireAuth, async (req: AuthReque
 router.get("/medical-documents/:id/ocr", requireAuth, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
+    const doc = await docManager.getById(id);
+    if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     const result = await docManager.ocr.getOcrResult(id);
     if (!result) { res.status(404).json({ error: "OCR result not found" }); return; }
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get OCR result" });
   }
 });
 
 router.get("/medical-documents/:id/lab-values", requireAuth, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
+    const doc = await docManager.getById(id);
+    if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     const values = await docManager.labAnalyzer.getLabValues(id);
     res.json(values);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get lab values" });
   }
 });
 
 router.get("/medical-documents/:id/medications", requireAuth, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
+    const doc = await docManager.getById(id);
+    if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     const medications = await docManager.prescriptionParser.getMedications(id);
     res.json(medications);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get medications" });
   }
 });
 
 router.get("/medical-documents/:id/image-analysis", requireAuth, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
+    const doc = await docManager.getById(id);
+    if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     const analysis = await docManager.imageAnalyzer.getAnalysis(id);
     if (!analysis) { res.status(404).json({ error: "Image analysis not found" }); return; }
     res.json(analysis);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get image analysis" });
   }
 });
 
 router.get("/medical-documents/:id/trends", requireAuth, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
+    const doc = await docManager.getById(id);
+    if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     const trends = await docManager.trendComparator.getTrends(id);
     res.json(trends);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get trends" });
   }
 });
 

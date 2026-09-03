@@ -1,20 +1,49 @@
 import { db, retrievalLogsTable } from "@workspace/db";
 import {
-  RagQuery, RagResponse, CitationEvidence, PipelineStage,
+  RagQuery, RagResponse, CitationEvidence, PipelineStage, PipelineMetrics,
 } from "./types";
 import { HybridSearchEngine } from "./retrieval/hybridSearch";
 import { SimpleReRanker } from "./retrieval/reRanker";
+import { LLMReRanker } from "./retrieval/llmReRanker";
+import { QueryRewriter } from "./retrieval/queryRewriter";
+import { ContextSelector } from "./retrieval/contextSelector";
 import { CitationEngine } from "./retrieval/citationEngine";
 import { PgVectorStore } from "./vector-store/pgVectorStore";
 import { EmbeddingProvider, VectorStore } from "./types";
 import { ragCache } from "./cache";
 import { createEmbedder } from "./embeddings/embedder";
 
+/**
+ * RAG Engine — Improved Pipeline Architecture
+ *
+ * CONCEPTUAL FLOW:
+ *   User Query
+ *   → Query Rewriting (expand medical synonyms)
+ *   → Hybrid Retrieval (semantic 70% + keyword 30%)
+ *   → LLM ReRanking (semantic relevance scoring)
+ *   → Context Selection (dedup + diversity + token budget)
+ *   → Citation Building (source attribution + confidence)
+ *   → Answer Generation (LLM with structured evidence)
+ *   → Source Tracking (persist citations for observability)
+ *
+ * IMPROVEMENTS OVER PREVIOUS VERSION:
+ * 1. Query rewriting bridges vocabulary gap between patient language and
+ *    clinical literature (e.g., "head hurts" → "cephalalgia, tension headache")
+ * 2. LLM reranking scores semantic relevance, not just term overlap
+ * 3. Context selection deduplicates and fits chunks within token budget
+ * 4. Pipeline metrics enable observability and tuning
+ *
+ * ALL IMPROVEMENTS ARE GRACEFUL — if any component fails, the pipeline
+ * falls back to the previous behavior. No single point of failure.
+ */
 export class RagEngine {
   private vectorStore: VectorStore;
   private embedder: EmbeddingProvider;
   private hybridSearch: HybridSearchEngine;
-  private reRanker: SimpleReRanker;
+  private simpleReRanker: SimpleReRanker;
+  private llmReRanker: LLMReRanker;
+  private queryRewriter: QueryRewriter;
+  private contextSelector: ContextSelector;
   private citationEngine: CitationEngine;
   private maxRetries: number;
 
@@ -26,7 +55,10 @@ export class RagEngine {
     this.vectorStore = params?.vectorStore ?? new PgVectorStore();
     this.embedder = params?.embedder ?? createEmbedder();
     this.hybridSearch = new HybridSearchEngine(this.vectorStore, this.embedder);
-    this.reRanker = new SimpleReRanker();
+    this.simpleReRanker = new SimpleReRanker();
+    this.llmReRanker = new LLMReRanker();
+    this.queryRewriter = new QueryRewriter();
+    this.contextSelector = new ContextSelector();
     this.citationEngine = new CitationEngine();
     this.maxRetries = params?.maxRetries ?? 2;
   }
@@ -86,14 +118,49 @@ export class RagEngine {
 
   private async executeQuery(normalizedQuery: string, query: RagQuery): Promise<RagResponse> {
     const topK = query.topK ?? 10;
+    const metrics: PipelineMetrics = {
+      queryRewriteMs: 0,
+      embeddingMs: 0,
+      retrievalMs: 0,
+      rerankMs: 0,
+      contextSelectionMs: 0,
+      totalChunksRetrieved: 0,
+      chunksAfterDedup: 0,
+      usedQueryRewrite: false,
+      usedLLMRerank: false,
+    };
 
-    // 1. Hybrid search
+    // ── Stage 1: Query Rewriting ──
+    // Expand user query with medical synonyms to improve retrieval recall.
+    // Skip for very short queries where rewriting adds noise.
+    let searchQuery = normalizedQuery;
+    if (normalizedQuery.length > 15 || query.forceRewrite) {
+      const rewriteStart = Date.now();
+      try {
+        const rewritten = await this.queryRewriter.rewrite(normalizedQuery);
+        // Only use rewritten query if it's meaningfully different and longer
+        if (rewritten.rewrittenQuery.length > normalizedQuery.length * 1.2) {
+          searchQuery = rewritten.rewrittenQuery;
+          metrics.usedQueryRewrite = true;
+        }
+      } catch {
+        // Graceful fallback: use original query
+      }
+      metrics.queryRewriteMs = Date.now() - rewriteStart;
+    }
+
+    // ── Stage 2: Hybrid Retrieval ──
+    // Retrieve from both semantic (vector) and keyword (tsvector) indices.
+    // Over-retrieve by 2x to give reranker more candidates.
+    const retrievalStart = Date.now();
     const hybridResults = await this.hybridSearch.search({
-      query: normalizedQuery,
-      topK: topK * 2,
-      minScore: 0.3,
+      query: searchQuery,
+      topK: topK * 3,
+      minScore: 0.25,
       filters: query.filters,
     });
+    metrics.retrievalMs = Date.now() - retrievalStart;
+    metrics.totalChunksRetrieved = hybridResults.length;
 
     if (hybridResults.length === 0) {
       return {
@@ -106,20 +173,61 @@ export class RagEngine {
         pipelineStage: query.pipelineStage ?? "general",
         latencyMs: 0,
         wasFallback: false,
+        metrics,
       };
     }
 
-    // 2. Re-rank
-    const reRanked = await this.reRanker.reRank(normalizedQuery, hybridResults, topK);
+    // ── Stage 3: Re-ranking ──
+    // Use LLM reranking for queries with enough candidates (4+ chunks).
+    // Fall back to SimpleReRanker for smaller result sets or on failure.
+    const rerankStart = Date.now();
+    let reRanked;
+    if (hybridResults.length >= 4) {
+      try {
+        reRanked = await this.llmReRanker.reRank(searchQuery, hybridResults, topK * 2);
+        metrics.usedLLMRerank = true;
+      } catch {
+        // LLM reranker falls back internally, but if it still fails:
+        reRanked = await this.simpleReRanker.reRank(searchQuery, hybridResults, topK * 2);
+      }
+    } else {
+      reRanked = await this.simpleReRanker.reRank(searchQuery, hybridResults, topK * 2);
+    }
+    metrics.rerankMs = Date.now() - rerankStart;
 
-    // 3. Build citations
-    const { evidenceGroups, citations } = await this.citationEngine.buildCitations(reRanked, query);
+    // ── Stage 4: Context Selection ──
+    // Deduplicate near-identical chunks, enforce source diversity,
+    // and fit within token budget.
+    const selectionStart = Date.now();
+    const selectedChunks = this.contextSelector.select(reRanked);
+    metrics.contextSelectionMs = Date.now() - selectionStart;
+    metrics.chunksAfterDedup = selectedChunks.length;
 
-    // 4. Generate summary
+    // ── Stage 5: Citation Building ──
+    // Build structured citations with source attribution and confidence.
+    // Use selected (deduplicated) chunks, not all reranked results.
+    const { evidenceGroups, citations } = await this.citationEngine.buildCitations(
+      selectedChunks,
+      query,
+    );
+
+    // ── Stage 6: Evidence Summary ──
     const summary = this.generateEvidenceSummary(evidenceGroups, normalizedQuery);
+
+    // Log pipeline metrics for observability
+    if (metrics.totalChunksRetrieved > 0) {
+      console.log(
+        `[rag] pipeline: rewrite=${metrics.queryRewriteMs}ms, ` +
+        `retrieval=${metrics.retrievalMs}ms, rerank=${metrics.rerankMs}ms, ` +
+        `context=${metrics.contextSelectionMs}ms, ` +
+        `chunks=${metrics.totalChunksRetrieved}→${metrics.chunksAfterDedup}, ` +
+        `rewrite=${metrics.usedQueryRewrite}, llm_rerank=${metrics.usedLLMRerank}`
+      );
+    }
 
     return {
       query: normalizedQuery,
+      rewrittenQuery: metrics.usedQueryRewrite ? searchQuery : undefined,
       hasEvidence: citations.length > 0,
       evidenceGroups,
       citations,
@@ -127,6 +235,7 @@ export class RagEngine {
       pipelineStage: query.pipelineStage ?? "general",
       latencyMs: 0,
       wasFallback: false,
+      metrics,
     };
   }
 
@@ -201,6 +310,12 @@ export class RagEngine {
         evidenceBlock += `${citation.evidenceText.slice(0, 300)}...\n`;
       }
       evidenceBlock += "\n";
+    }
+
+    // Include pipeline metrics in debug output (helpful for interview demos)
+    if (response.metrics) {
+      const m = response.metrics;
+      evidenceBlock += `[Pipeline: rewrite=${m.queryRewriteMs}ms, retrieval=${m.retrievalMs}ms, rerank=${m.rerankMs}ms, context=${m.contextSelectionMs}ms, chunks=${m.totalChunksRetrieved}→${m.chunksAfterDedup}]\n`;
     }
 
     evidenceBlock += "[/MEDICAL EVIDENCE]\n";

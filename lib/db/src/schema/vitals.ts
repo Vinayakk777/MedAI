@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, numeric, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -20,7 +20,10 @@ export const vitalsTable = pgTable("vitals", {
   source: text("source").notNull().default("manual"),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("vitals_user_id_idx").on(t.userId),
+  userIdRecordedIdx: index("vitals_user_id_recorded_idx").on(t.userId, t.recordedAt),
+}));
 
 export const insertVitalSchema = createInsertSchema(vitalsTable).omit({
   id: true,

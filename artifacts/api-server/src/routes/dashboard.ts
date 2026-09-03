@@ -472,12 +472,23 @@ router.post("/dashboard/providers/:name/sync", requireAuth, async (req, res) => 
 router.get("/dashboard/vitals", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(vitalsTable)
       .where(eq(vitalsTable.userId, userId))
-      .orderBy(desc(vitalsTable.recordedAt));
-    res.json(rows);
+      .orderBy(desc(vitalsTable.recordedAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(vitalsTable)
+      .where(eq(vitalsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list vitals failed");
     res.status(500).json({ error: "Failed to fetch vitals" });
@@ -522,12 +533,23 @@ router.delete("/dashboard/vitals/:id", requireAuth, async (req, res) => {
 router.get("/dashboard/metrics", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(healthMetricsTable)
       .where(eq(healthMetricsTable.userId, userId))
-      .orderBy(desc(healthMetricsTable.metricDate));
-    res.json(rows);
+      .orderBy(desc(healthMetricsTable.metricDate))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(healthMetricsTable)
+      .where(eq(healthMetricsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list metrics failed");
     res.status(500).json({ error: "Failed to fetch metrics" });
@@ -572,12 +594,23 @@ router.delete("/dashboard/metrics/:id", requireAuth, async (req, res) => {
 router.get("/dashboard/medications", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(medicationsTable)
       .where(eq(medicationsTable.userId, userId))
-      .orderBy(desc(medicationsTable.updatedAt));
-    res.json(rows);
+      .orderBy(desc(medicationsTable.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(medicationsTable)
+      .where(eq(medicationsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list medications failed");
     res.status(500).json({ error: "Failed to fetch medications" });
@@ -660,12 +693,23 @@ router.get("/dashboard/medication-guide", requireAuth, (req, res) => {
 router.get("/dashboard/reports", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(healthReportsTable)
       .where(eq(healthReportsTable.userId, userId))
-      .orderBy(desc(healthReportsTable.reportDate));
-    res.json(rows);
+      .orderBy(desc(healthReportsTable.reportDate))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(healthReportsTable)
+      .where(eq(healthReportsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list reports failed");
     res.status(500).json({ error: "Failed to fetch reports" });
@@ -710,12 +754,23 @@ router.delete("/dashboard/reports/:id", requireAuth, async (req, res) => {
 router.get("/dashboard/risk-assessments", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(riskAssessmentsTable)
       .where(eq(riskAssessmentsTable.userId, userId))
-      .orderBy(desc(riskAssessmentsTable.assessedAt));
-    res.json(rows);
+      .orderBy(desc(riskAssessmentsTable.assessedAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(riskAssessmentsTable)
+      .where(eq(riskAssessmentsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list risk assessments failed");
     res.status(500).json({ error: "Failed to fetch risk assessments" });
@@ -760,12 +815,23 @@ router.delete("/dashboard/risk-assessments/:id", requireAuth, async (req, res) =
 router.get("/dashboard/symptom-logs", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
     const rows = await db
       .select()
       .from(symptomLogsTable)
       .where(eq(symptomLogsTable.userId, userId))
-      .orderBy(desc(symptomLogsTable.createdAt));
-    res.json(rows);
+      .orderBy(desc(symptomLogsTable.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: sql<number>`count(*)::int` })
+      .from(symptomLogsTable)
+      .where(eq(symptomLogsTable.userId, userId));
+
+    res.json({ data: rows, total, limit, offset });
   } catch (err) {
     (req as any).log.error({ err }, "list symptom logs failed");
     res.status(500).json({ error: "Failed to fetch symptom logs" });

@@ -87,7 +87,10 @@ router.get("/safety/evaluations/:id", requireAuth, async (req: AuthRequest, res)
   try {
     const [evaluation] = await db.select()
       .from(safetyEvaluationsTable)
-      .where(eq(safetyEvaluationsTable.id, req.params.id as string))
+      .where(and(
+        eq(safetyEvaluationsTable.id, req.params.id as string),
+        eq(safetyEvaluationsTable.userId, req.userId),
+      ))
       .limit(1);
 
     if (!evaluation) {
@@ -102,7 +105,7 @@ router.get("/safety/evaluations/:id", requireAuth, async (req: AuthRequest, res)
 
     res.json({ ...evaluation, violations });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get evaluation" });
   }
 });
 

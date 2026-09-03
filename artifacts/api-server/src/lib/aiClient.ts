@@ -1,11 +1,24 @@
-import OpenAI from "openai";
+import { llm } from "./llm";
 
-const groqKey = process.env.GROQ_API_KEY;
-const groqClient = groqKey
-  ? new OpenAI({ apiKey: groqKey, baseURL: "https://api.groq.com/openai/v1" })
-  : null;
-
-const MODEL = "openai/gpt-oss-20b";
+/**
+ * AI Client — Backward-compatible wrapper
+ *
+ * MAINTAINS THE SAME `generateJSON` API that 16+ engines import.
+ * Internally delegates to the new LLM provider abstraction.
+ *
+ * WHY A WRAPPER:
+ * - Zero changes needed in 16+ engine files
+ * - They still import `{ generateJSON } from "./aiClient"`
+ * - The underlying implementation now has fallback + retry + token tracking
+ *
+ * MIGRATION PATH:
+ * Engines can gradually migrate to import from `./llm` directly:
+ *   import { llm } from "./llm";
+ *   const result = await llm.generateJSON<T>({ ... });
+ *   console.log(result.usage.totalTokens);
+ *
+ * For now, this wrapper preserves backward compatibility.
+ */
 
 export interface JSONGenParams {
   systemPrompt: string;
@@ -15,35 +28,24 @@ export interface JSONGenParams {
   signal?: AbortSignal;
 }
 
+/**
+ * Generate structured JSON from the LLM.
+ *
+ * Delegates to the shared LLM client which handles:
+ * - Provider selection (Groq → OpenAI fallback)
+ * - Retry with exponential backoff
+ * - Token usage tracking
+ *
+ * Returns T on success, null on failure (same contract as before).
+ */
 export async function generateJSON<T>(params: JSONGenParams): Promise<T | null> {
-  if (!groqClient) {
-    console.error("[aiClient] GROQ_API_KEY not set");
-    return null;
-  }
+  const result = await llm.generateJSON<T>({
+    systemPrompt: params.systemPrompt,
+    userContent: params.userContent,
+    temperature: params.temperature,
+    maxTokens: params.maxTokens,
+    signal: params.signal,
+  });
 
-  try {
-    const result = await groqClient.chat.completions.create(
-      {
-        model: MODEL,
-        messages: [
-          { role: "system", content: params.systemPrompt },
-          { role: "user", content: params.userContent },
-        ],
-        response_format: { type: "json_object" },
-        reasoning_effort: "low" as never,
-        temperature: params.temperature ?? 0.3,
-        max_tokens: params.maxTokens ?? 1024,
-      },
-      { signal: params.signal },
-    );
-
-    const raw = result.choices[0]?.message?.content;
-    if (!raw) return null;
-
-    return JSON.parse(raw) as T;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[aiClient] generation failed:", message);
-    return null;
-  }
+  return result.data;
 }

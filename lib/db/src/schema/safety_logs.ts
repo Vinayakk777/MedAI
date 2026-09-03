@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, jsonb, real, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, jsonb, real, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -25,7 +25,9 @@ export const safetyEvaluationsTable = pgTable("safety_evaluations", {
   evidenceCoverageScore: real("evidence_coverage_score"),
   latencyMs: integer("latency_ms"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("safety_evaluations_user_id_idx").on(t.userId),
+}));
 
 // ─── Safety Violations ───
 

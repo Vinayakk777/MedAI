@@ -42,6 +42,7 @@ import {
   type HealthProviderConfig,
 } from "../lib/healthProviders";
 import { searchMedicationGuide } from "../lib/medicationGuide";
+import { llm } from "../lib/llm";
 
 const router: IRouter = Router();
 
@@ -512,6 +513,63 @@ router.post("/dashboard/vitals", requireAuth, async (req, res) => {
     (req as any).log.error({ err }, "create vital failed");
     res.status(500).json({ error: "Failed to create vital" });
   }
+});
+
+router.post("/dashboard/vitals/analyze", requireAuth, async (req, res) => {
+  const { heartRate, systolic, diastolic, respiratoryRate, temperature, oxygenSaturation, bloodGlucose, weight, height, painScore, notes } = req.body;
+
+  const readings: string[] = [];
+  if (heartRate != null) readings.push(`Heart Rate: ${heartRate} bpm`);
+  if (systolic != null && diastolic != null) readings.push(`Blood Pressure: ${systolic}/${diastolic} mmHg`);
+  else if (systolic != null) readings.push(`Systolic BP: ${systolic} mmHg`);
+  if (respiratoryRate != null) readings.push(`Respiratory Rate: ${respiratoryRate} breaths/min`);
+  if (temperature != null) readings.push(`Temperature: ${temperature}°F`);
+  if (oxygenSaturation != null) readings.push(`SpO₂: ${oxygenSaturation}%`);
+  if (bloodGlucose != null) readings.push(`Blood Glucose: ${bloodGlucose} mg/dL`);
+  if (weight != null) readings.push(`Weight: ${weight} lbs`);
+  if (height != null) readings.push(`Height: ${height} inches`);
+  if (painScore != null) readings.push(`Pain Score: ${painScore}/10`);
+  if (notes) readings.push(`Notes: ${notes}`);
+
+  if (readings.length === 0) {
+    res.status(400).json({ error: "No vitals provided" });
+    return;
+  }
+
+  const result = await llm.generateJSON<{
+    summary: string;
+    riskLevel: "normal" | "caution" | "warning" | "critical";
+    findings: { metric: string; value: string; status: "normal" | "caution" | "warning" | "critical"; explanation: string }[];
+    recommendations: string[];
+    seekMedicalAttention: boolean;
+  }>({
+    systemPrompt: `You are a medical AI assistant. Analyze the following vital sign readings and provide:
+1. A one-line summary of overall health status
+2. A risk level: "normal" (all within healthy range), "caution" (mildly outside normal, monitor), "warning" (significantly abnormal, see doctor soon), or "critical" (dangerously abnormal, seek emergency care)
+3. Individual findings for each metric with status and explanation
+4. Practical recommendations (lifestyle, when to see a doctor)
+5. Whether to seek immediate medical attention (true/false)
+
+Normal adult ranges:
+- Heart Rate: 60-100 bpm (resting)
+- Systolic BP: 90-120 mmHg, Diastolic BP: 60-80 mmHg
+- Respiratory Rate: 12-20 breaths/min
+- Temperature: 97-99°F (36.1-37.2°C)
+- SpO₂: 95-100%
+- Blood Glucose (fasting): 70-99 mg/dL (normal), 100-125 (prediabetes), 126+ (diabetes)
+- BMI: 18.5-24.9 (normal), 25-29.9 (overweight), 30+ (obese)
+- Pain Score: 0-3 (mild), 4-6 (moderate), 7-10 (severe)
+
+Be thorough but concise. This is NOT a diagnosis — always recommend consulting a healthcare professional.`,
+    userContent: `Analyze these vitals:\n${readings.join("\n")}`,
+    temperature: 0.3,
+  });
+
+  if (!result.data) {
+    res.status(500).json({ error: "AI analysis failed" });
+    return;
+  }
+  res.json(result.data);
 });
 
 router.delete("/dashboard/vitals/:id", requireAuth, async (req, res) => {

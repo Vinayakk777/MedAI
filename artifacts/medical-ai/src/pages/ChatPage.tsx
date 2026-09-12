@@ -177,7 +177,10 @@ export default function ChatPage() {
 
   const { data: conversations = [], isLoading: convsLoading } = useQuery<ServerConversation[]>({
     queryKey: ["conversations"],
-    queryFn: () => apiFetch("/api/conversations"),
+    queryFn: async () => {
+      const res = await apiFetch<{ data: ServerConversation[] }>("/api/conversations");
+      return Array.isArray(res) ? res : res?.data ?? [];
+    },
   });
 
   const { data: convData, isLoading: msgsLoading } = useQuery<

@@ -452,7 +452,7 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
           fullResponse += chunk.content;
           res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
         },
-        onDone: (_fullText: string, usage: Record<string, unknown>) => {
+        onDone: (_fullText: string, usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
           streamUsage = usage;
         },
         onError: (err: unknown) => {

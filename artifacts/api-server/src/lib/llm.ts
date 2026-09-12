@@ -152,6 +152,7 @@ async function streamChat(params: StreamChatParams): Promise<void> {
 }
 
 export const llm = {
+  primary: process.env.GROQ_API_KEY ? { name: "groq" } : process.env.OPENAI_API_KEY ? { name: "openai" } : null,
   generateJSON,
   generateText,
   streamChat,

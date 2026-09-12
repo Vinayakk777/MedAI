@@ -42,11 +42,7 @@ app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(
-  clerkMiddleware({
-    publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-  }),
-);
+app.use(clerkMiddleware());
 
 app.use("/api", router);
 

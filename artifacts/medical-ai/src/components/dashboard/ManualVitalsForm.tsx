@@ -123,7 +123,7 @@ export function ManualVitalsForm({ onDone }: Props) {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-      className="rounded-2xl border border-white/10 bg-card/90 backdrop-blur-sm p-5">
+      className="rounded-2xl border border-emerald-500/30 bg-card p-5 relative z-50 shadow-2xl">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Plus className="w-4 h-4 text-emerald-400" />
@@ -158,7 +158,8 @@ export function ManualVitalsForm({ onDone }: Props) {
                       value={form[f.key]}
                       onChange={set(f.key)}
                       placeholder={f.placeholder}
-                      className="w-full bg-background/50 border border-white/8 rounded-lg px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/25 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 transition-colors tabular-nums"
+                      className="w-full bg-white/5 border border-white/15 rounded-lg px-2.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/30 transition-all tabular-nums cursor-text"
+                      style={{ WebkitAppearance: "none" }}
                     />
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground/30 pointer-events-none">{f.unit}</span>
                   </div>

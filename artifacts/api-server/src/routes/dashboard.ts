@@ -508,6 +508,19 @@ router.post("/dashboard/vitals", requireAuth, async (req, res) => {
       .insert(vitalsTable)
       .values({ ...parsed.data, userId })
       .returning();
+
+    // Also save to health_metrics for dashboard tracking
+    const metricData: Record<string, any> = { userId, source: parsed.data.source ?? "manual" };
+    if (parsed.data.heartRate != null) metricData.heartRate = parsed.data.heartRate;
+    if (parsed.data.weight != null) metricData.weight = parsed.data.weight;
+    if (parsed.data.height != null) metricData.height = parsed.data.height;
+
+    if (Object.keys(metricData).length > 2) {
+      try {
+        await db.insert(healthMetricsTable).values(metricData as any);
+      } catch {}
+    }
+
     res.status(201).json(row);
   } catch (err) {
     (req as any).log.error({ err }, "create vital failed");

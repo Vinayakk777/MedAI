@@ -498,27 +498,41 @@ router.get("/dashboard/vitals", requireAuth, async (req, res) => {
 
 router.post("/dashboard/vitals", requireAuth, async (req, res) => {
   const { userId } = req as AuthRequest;
-  const parsed = insertVitalSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+  const body = req.body as Record<string, any>;
+
+  const vitalData: Record<string, any> = { userId, source: body.source ?? "manual" };
+  if (body.heartRate != null) vitalData.heartRate = body.heartRate;
+  if (body.systolic != null) vitalData.systolic = body.systolic;
+  if (body.diastolic != null) vitalData.diastolic = body.diastolic;
+  if (body.respiratoryRate != null) vitalData.respiratoryRate = body.respiratoryRate;
+  if (body.temperature != null) vitalData.temperature = body.temperature;
+  if (body.oxygenSaturation != null) vitalData.oxygenSaturation = body.oxygenSaturation;
+  if (body.bloodGlucose != null) vitalData.bloodGlucose = body.bloodGlucose;
+  if (body.weight != null) vitalData.weight = body.weight;
+  if (body.height != null) vitalData.height = body.height;
+  if (body.bmi != null) vitalData.bmi = body.bmi;
+  if (body.painScore != null) vitalData.painScore = body.painScore;
+
+  const hasAny = Object.keys(vitalData).some(k => k !== "userId" && k !== "source" && vitalData[k] != null);
+  if (!hasAny) {
+    res.status(400).json({ error: "No vitals provided" });
     return;
   }
+
   try {
     const [row] = await db
       .insert(vitalsTable)
-      .values({ ...parsed.data, userId })
+      .values(vitalData as any)
       .returning();
 
     // Also save to health_metrics for dashboard tracking
-    const metricData: Record<string, any> = { userId, source: parsed.data.source ?? "manual" };
-    if (parsed.data.heartRate != null) metricData.heartRate = parsed.data.heartRate;
-    if (parsed.data.weight != null) metricData.weight = parsed.data.weight;
-    if (parsed.data.height != null) metricData.height = parsed.data.height;
+    const metricData: Record<string, any> = { userId, source: vitalData.source };
+    if (vitalData.heartRate != null) metricData.heartRate = vitalData.heartRate;
+    if (vitalData.weight != null) metricData.weight = vitalData.weight;
+    if (vitalData.height != null) metricData.height = vitalData.height;
 
     if (Object.keys(metricData).length > 2) {
-      try {
-        await db.insert(healthMetricsTable).values(metricData as any);
-      } catch {}
+      try { await db.insert(healthMetricsTable).values(metricData as any); } catch {}
     }
 
     res.status(201).json(row);

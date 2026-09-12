@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { ClerkProvider, Show, useClerk } from "@clerk/react";
-import { publishableKeyFromHost } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { AnimatePresence, motion } from "framer-motion";
 import { Activity } from "lucide-react";
@@ -22,11 +21,8 @@ const ClinicianPortalPage = lazy(() => import("@/pages/ClinicianPortalPage"));
 const DocumentsPage = lazy(() => import("@/pages/DocumentsPage"));
 const RagAdminPage = lazy(() => import("@/pages/RagAdminPage"));
 
-// REQUIRED — resolves key from hostname for multi-domain / custom-domain support
-const clerkPubKey = publishableKeyFromHost(
-  window.location.hostname,
-  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
-);
+// Use publishable key directly from env var
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // REQUIRED — empty in dev (intentional), auto-injected in production
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;

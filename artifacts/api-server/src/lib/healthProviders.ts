@@ -421,12 +421,363 @@ class GoogleHealthProvider implements HealthProvider {
   }
 }
 
-class AppleHealthProvider extends MockHealthProvider {
-  constructor() { super("apple_health", "Apple Health"); }
+class FitbitProvider implements HealthProvider {
+  readonly name = "fitbit";
+  readonly displayName = "Fitbit";
+
+  private getCredentials(): { clientId: string; clientSecret: string } | null {
+    const clientId = process.env.FITBIT_CLIENT_ID?.trim();
+    const clientSecret = process.env.FITBIT_CLIENT_SECRET?.trim();
+    if (!clientId || !clientSecret) return null;
+    return { clientId, clientSecret };
+  }
+
+  isConnected(config: HealthProviderConfig): boolean {
+    return !!(config.accessToken || config.refreshToken);
+  }
+
+  connectUrl(redirectUri: string): string {
+    const creds = this.getCredentials();
+    if (!creds) throw new Error("Fitbit is not configured. Set FITBIT_CLIENT_ID and FITBIT_CLIENT_SECRET.");
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: creds.clientId,
+      redirect_uri: redirectUri,
+      scope: "activity heartrate sleep weight respiratory_rate temperature oxygen_saturation",
+      expires_in: "604800",
+    });
+    return `https://www.fitbit.com/oauth2/authorize?${params.toString()}`;
+  }
+
+  async exchangeCode(code: string, redirectUri: string): Promise<HealthProviderConfig> {
+    const creds = this.getCredentials();
+    if (!creds) throw new Error("Fitbit not configured");
+    const body = new URLSearchParams({
+      code,
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    });
+    const res = await fetch("https://api.fitbit.com/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64")}` },
+      body: body.toString(),
+    });
+    if (!res.ok) throw new Error(`Fitbit token exchange failed: ${res.status}`);
+    const data = await res.json() as any;
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      scopes: data.scope?.split(" "),
+      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
+    };
+  }
+
+  async refreshAccessToken(config: HealthProviderConfig): Promise<HealthProviderConfig> {
+    const creds = this.getCredentials();
+    if (!creds || !config.refreshToken) return config;
+    const body = new URLSearchParams({
+      refresh_token: config.refreshToken,
+      grant_type: "refresh_token",
+    });
+    const res = await fetch("https://api.fitbit.com/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64")}` },
+      body: body.toString(),
+    });
+    if (!res.ok) return config;
+    const data = await res.json() as any;
+    return { ...config, accessToken: data.access_token, refreshToken: data.refresh_token ?? config.refreshToken, expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : config.expiresAt };
+  }
+
+  private async ensureToken(config: HealthProviderConfig): Promise<string> {
+    let token = config.accessToken;
+    if (!token) throw new Error("Not connected");
+    if (config.expiresAt && Date.now() > config.expiresAt && config.refreshToken) {
+      const refreshed = await this.refreshAccessToken(config);
+      token = refreshed.accessToken;
+    }
+    return token!;
+  }
+
+  private async fitbitFetch<T>(url: string, token: string): Promise<T> {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`Fitbit API ${res.status}`);
+    return res.json() as Promise<T>;
+  }
+
+  async fetchLatestVitals(config: HealthProviderConfig): Promise<HealthProviderVitals> {
+    const token = await this.ensureToken(config);
+    const today = new Date().toISOString().slice(0, 10);
+    const vitals: HealthProviderVitals = {};
+
+    try {
+      const hr = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/activities/heart/date/${today}/1d.json`, token);
+      const rhr = hr?.["activities-heart"]?.[0]?.value?.restingHeartRate;
+      if (rhr) vitals.heartRate = rhr;
+    } catch {}
+
+    try {
+      const sleep = await this.fitbitFetch<any>(`https://api.fitbit.com/1.2/user/-/sleep/date/${today}.json`, token);
+      const mins = sleep?.summary?.totalMinutesAsleep;
+      if (mins) vitals.sleepHours = Math.round((mins / 60) * 10) / 10;
+    } catch {}
+
+    try {
+      const act = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/activities/date/${today}.json`, token);
+      const steps = act?.summary?.steps;
+      if (steps) vitals.steps = steps;
+      const cal = act?.summary?.caloriesOut;
+      if (cal) vitals.caloriesBurned = cal;
+    } catch {}
+
+    try {
+      const temp = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/temp/date/${today}.json`, token);
+      const val = temp?.temp?.[0]?.value;
+      if (val) vitals.temperature = val;
+    } catch {}
+
+    try {
+      const spo2 = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/spo2/date/${today}.json`, token);
+      const val = spo2?.value;
+      if (val) vitals.oxygenSaturation = Math.round(val);
+    } catch {}
+
+    try {
+      const resp = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/br/date/${today}.json`, token);
+      const val = resp?.br?.[0]?.value?.breathingRate;
+      if (val) vitals.respiratoryRate = Math.round(val);
+    } catch {}
+
+    try {
+      const wt = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/body/log/weight/date/${today}.json`, token);
+      const w = wt?.weight?.[0]?.weight;
+      if (w) vitals.weight = w;
+    } catch {}
+
+    return vitals;
+  }
+
+  async fetchVitalsHistory(config: HealthProviderConfig, from: Date, to: Date): Promise<HealthProviderVitals[]> {
+    const token = await this.ensureToken(config);
+    const days = Math.min(Math.floor((to.getTime() - from.getTime()) / 86400000), 90);
+    const history: HealthProviderVitals[] = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(from);
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const entry: HealthProviderVitals = {};
+      try {
+        const hr = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/activities/heart/date/${dateStr}/1d.json`, token);
+        const rhr = hr?.["activities-heart"]?.[0]?.value?.restingHeartRate;
+        if (rhr) entry.heartRate = rhr;
+      } catch {}
+      try {
+        const sleep = await this.fitbitFetch<any>(`https://api.fitbit.com/1.2/user/-/sleep/date/${dateStr}.json`, token);
+        const mins = sleep?.summary?.totalMinutesAsleep;
+        if (mins) entry.sleepHours = Math.round((mins / 60) * 10) / 10;
+      } catch {}
+      try {
+        const act = await this.fitbitFetch<any>(`https://api.fitbit.com/1/user/-/activities/date/${dateStr}.json`, token);
+        if (act?.summary?.steps) entry.steps = act.summary.steps;
+      } catch {}
+      history.push(entry);
+    }
+    return history;
+  }
 }
 
-class FitbitProvider extends MockHealthProvider {
-  constructor() { super("fitbit", "Fitbit"); }
+class GoogleFitProvider implements HealthProvider {
+  readonly name = "google_fit";
+  readonly displayName = "Google Fit";
+
+  private getCredentials(): { clientId: string; clientSecret: string } | null {
+    const clientId = process.env.GOOGLE_FIT_CLIENT_ID?.trim();
+    const clientSecret = process.env.GOOGLE_FIT_CLIENT_SECRET?.trim();
+    if (!clientId || !clientSecret) return null;
+    return { clientId, clientSecret };
+  }
+
+  isConnected(config: HealthProviderConfig): boolean {
+    return !!(config.accessToken || config.refreshToken);
+  }
+
+  connectUrl(redirectUri: string): string {
+    const creds = this.getCredentials();
+    if (!creds) throw new Error("Google Fit not configured. Set GOOGLE_FIT_CLIENT_ID and GOOGLE_FIT_CLIENT_SECRET.");
+    const params = new URLSearchParams({
+      client_id: creds.clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      access_type: "offline",
+      prompt: "consent",
+      scope: "https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.body.read https://www.googleapis.com/auth/fitness.sleep.read https://www.googleapis.com/auth/fitness.blood_oxygen.read https://www.googleapis.com/auth/fitness.blood_glucose.read https://www.googleapis.com/auth/fitness.body.temperature.read https://www.googleapis.com/auth/fitness.oxygen_saturation.read",
+    });
+    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  async exchangeCode(code: string, redirectUri: string): Promise<HealthProviderConfig> {
+    const creds = this.getCredentials();
+    if (!creds) throw new Error("Google Fit not configured");
+    const body = new URLSearchParams({
+      code, client_id: creds.clientId, client_secret: creds.clientSecret, redirect_uri: redirectUri, grant_type: "authorization_code",
+    });
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    if (!res.ok) throw new Error(`Google Fit token exchange failed: ${res.status}`);
+    const data = await res.json() as any;
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
+    };
+  }
+
+  async refreshAccessToken(config: HealthProviderConfig): Promise<HealthProviderConfig> {
+    const creds = this.getCredentials();
+    if (!creds || !config.refreshToken) return config;
+    const body = new URLSearchParams({
+      refresh_token: config.refreshToken, client_id: creds.clientId, client_secret: creds.clientSecret, grant_type: "refresh_token",
+    });
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    if (!res.ok) return config;
+    const data = await res.json() as any;
+    return { ...config, accessToken: data.access_token, expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : config.expiresAt };
+  }
+
+  private async ensureToken(config: HealthProviderConfig): Promise<string> {
+    let token = config.accessToken;
+    if (!token) throw new Error("Not connected");
+    if (config.expiresAt && Date.now() > config.expiresAt && config.refreshToken) {
+      const refreshed = await this.refreshAccessToken(config);
+      token = refreshed.accessToken;
+    }
+    return token!;
+  }
+
+  private async aggregateRequest(token: string, body: any): Promise<any> {
+    const res = await fetch("https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Google Fit API ${res.status}`);
+    return res.json();
+  }
+
+  async fetchLatestVitals(config: HealthProviderConfig): Promise<HealthProviderVitals> {
+    const token = await this.ensureToken(config);
+    const now = Date.now();
+    const dayAgo = now - 86400000;
+    const vitals: HealthProviderVitals = {};
+
+    try {
+      const data = await this.aggregateRequest(token, {
+        aggregateBy: [{ dataTypeName: "com.google.heart_rate.bpm" }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: dayAgo,
+        endTimeMillis: now,
+      });
+      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+      if (pts.length > 0) {
+        const latest = pts[pts.length - 1];
+        vitals.heartRate = Math.round(latest.value?.[0]?.fpVal ?? latest.value?.[0]?.intVal ?? 0);
+      }
+    } catch {}
+
+    try {
+      const data = await this.aggregateRequest(token, {
+        aggregateBy: [{ dataTypeName: "com.google.step_count.delta" }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: dayAgo,
+        endTimeMillis: now,
+      });
+      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+      if (pts.length > 0) vitals.steps = pts[0].value?.[0]?.intVal;
+    } catch {}
+
+    try {
+      const data = await this.aggregateRequest(token, {
+        aggregateBy: [{ dataTypeName: "com.google.body.temperature" }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: dayAgo,
+        endTimeMillis: now,
+      });
+      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+      if (pts.length > 0) vitals.temperature = pts[0].value?.[0]?.fpVal;
+    } catch {}
+
+    try {
+      const data = await this.aggregateRequest(token, {
+        aggregateBy: [{ dataTypeName: "com.google.oxygen_saturation" }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: dayAgo,
+        endTimeMillis: now,
+      });
+      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+      if (pts.length > 0) vitals.oxygenSaturation = Math.round((pts[0].value?.[0]?.fpVal ?? 0) * 100);
+    } catch {}
+
+    try {
+      const data = await this.aggregateRequest(token, {
+        aggregateBy: [{ dataTypeName: "com.google.blood_glucose" }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: dayAgo,
+        endTimeMillis: now,
+      });
+      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+      if (pts.length > 0) vitals.bloodGlucose = pts[0].value?.[0]?.fpVal;
+    } catch {}
+
+    try {
+      const data = await this.aggregateRequest(token, {
+        aggregateBy: [{ dataTypeName: "com.google.body.fat.percentage" }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: dayAgo,
+        endTimeMillis: now,
+      });
+      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+      if (pts.length > 0) vitals.weight = pts[0].value?.[0]?.fpVal;
+    } catch {}
+
+    return vitals;
+  }
+
+  async fetchVitalsHistory(config: HealthProviderConfig, from: Date, to: Date): Promise<HealthProviderVitals[]> {
+    const token = await this.ensureToken(config);
+    const days = Math.min(Math.floor((to.getTime() - from.getTime()) / 86400000), 90);
+    const history: HealthProviderVitals[] = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(from);
+      d.setDate(d.getDate() + i);
+      const start = d.getTime();
+      const end = start + 86400000;
+      const entry: HealthProviderVitals = {};
+      try {
+        const data = await this.aggregateRequest(token, {
+          aggregateBy: [{ dataTypeName: "com.google.step_count.delta" }],
+          bucketByTime: { durationMillis: 86400000 },
+          startTimeMillis: start, endTimeMillis: end,
+        });
+        const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
+        if (pts.length > 0) entry.steps = pts[0].value?.[0]?.intVal;
+      } catch {}
+      history.push(entry);
+    }
+    return history;
+  }
+}
+
+class AppleHealthProvider extends MockHealthProvider {
+  constructor() { super("apple_health", "Apple Health"); }
 }
 
 class GarminProvider extends MockHealthProvider {
@@ -438,10 +789,11 @@ class SamsungHealthProvider extends MockHealthProvider {
 }
 
 const googleHealth = new GoogleHealthProvider();
+const googleFit = new GoogleFitProvider();
 
 const providers: Record<string, HealthProvider> = {
   google_health: googleHealth,
-  google_fit: googleHealth,
+  google_fit: googleFit,
   apple_health: new AppleHealthProvider(),
   fitbit: new FitbitProvider(),
   garmin: new GarminProvider(),

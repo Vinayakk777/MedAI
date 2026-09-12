@@ -59,6 +59,8 @@ export function ManualVitalsForm({ onDone }: Props) {
     onSuccess: (data) => {
       setAnalysis(data);
       queryClient.invalidateQueries({ queryKey: ["dashboard", "vitals"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "vitals", "analysis"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "vitals", "history"] });
     },
     onError: (err) => setError(err instanceof Error ? err.message : "Failed"),
   });

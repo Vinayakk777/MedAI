@@ -612,7 +612,7 @@ class GoogleFitProvider implements HealthProvider {
       response_type: "code",
       access_type: "offline",
       prompt: "consent",
-      scope: "https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.body.read https://www.googleapis.com/auth/fitness.sleep.read https://www.googleapis.com/auth/fitness.blood_oxygen.read https://www.googleapis.com/auth/fitness.blood_glucose.read https://www.googleapis.com/auth/fitness.body.temperature.read https://www.googleapis.com/auth/fitness.oxygen_saturation.read",
+      scope: "https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.body.read https://www.googleapis.com/auth/fitness.sleep.read https://www.googleapis.com/auth/fitness.blood_glucose.read https://www.googleapis.com/auth/fitness.oxygen_saturation.read",
     });
     return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
@@ -706,17 +706,6 @@ class GoogleFitProvider implements HealthProvider {
 
     try {
       const data = await this.aggregateRequest(token, {
-        aggregateBy: [{ dataTypeName: "com.google.body.temperature" }],
-        bucketByTime: { durationMillis: 86400000 },
-        startTimeMillis: dayAgo,
-        endTimeMillis: now,
-      });
-      const pts = data.bucket?.[0]?.dataset?.[0]?.point ?? [];
-      if (pts.length > 0) vitals.temperature = pts[0].value?.[0]?.fpVal;
-    } catch {}
-
-    try {
-      const data = await this.aggregateRequest(token, {
         aggregateBy: [{ dataTypeName: "com.google.oxygen_saturation" }],
         bucketByTime: { durationMillis: 86400000 },
         startTimeMillis: dayAgo,
@@ -739,7 +728,7 @@ class GoogleFitProvider implements HealthProvider {
 
     try {
       const data = await this.aggregateRequest(token, {
-        aggregateBy: [{ dataTypeName: "com.google.body.fat.percentage" }],
+        aggregateBy: [{ dataTypeName: "com.google.weight" }],
         bucketByTime: { durationMillis: 86400000 },
         startTimeMillis: dayAgo,
         endTimeMillis: now,

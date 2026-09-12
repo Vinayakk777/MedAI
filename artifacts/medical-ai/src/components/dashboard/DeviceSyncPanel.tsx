@@ -184,7 +184,7 @@ export function DeviceSyncPanel() {
           .then((data: any) => {
             if (data.config?.accessToken) {
               saveConfig(providerName, data.config);
-              setStatus(`${providerName === "fitbit" ? "Fitbit" : "Google Fit"} connected successfully!`);
+              setStatus(`Connected successfully!`);
             }
           })
           .catch(() => setStatus("OAuth callback failed"));
@@ -196,7 +196,6 @@ export function DeviceSyncPanel() {
   const configs: Record<string, [ProviderConfig | null, (c: ProviderConfig | null) => void]> = {
     google_health: [gc, setGc],
     google_fit: [gfc, setGfc],
-    fitbit: [fc, setFc],
   };
 
   return (
@@ -215,19 +214,30 @@ export function DeviceSyncPanel() {
       </p>
 
       <div className="space-y-3">
-        {(["google_health", "google_fit", "fitbit"] as const).map((name) => {
+        {(["google_health", "google_fit"] as const).map((name) => {
           const [cfg, setCfg] = configs[name];
           return (
             <ProviderCard
               key={name}
               name={name}
-              displayName={name === "google_health" ? "Google Health" : name === "google_fit" ? "Google Fit" : "Fitbit"}
+              displayName={name === "google_health" ? "Google Health" : "Google Fit"}
               config={cfg}
               setConfig={setCfg}
               setStatus={setStatus}
             />
           );
         })}
+
+        <div className="rounded-xl border border-white/5 bg-white/3 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Watch className="w-4 h-4 text-muted-foreground/40" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground/60">Fitbit</p>
+              <p className="text-[11px] text-muted-foreground/40">Heart rate, sleep, SpO₂, steps from your Fitbit device</p>
+            </div>
+            <span className="text-[10px] text-muted-foreground/30 border border-white/8 px-2 py-0.5 rounded-full">coming soon</span>
+          </div>
+        </div>
 
         {status && (
           <div className="flex items-start gap-2 text-xs rounded-xl border border-cyan-500/15 bg-cyan-500/5 px-3 py-2.5">

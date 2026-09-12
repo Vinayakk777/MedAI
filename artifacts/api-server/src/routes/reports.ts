@@ -33,7 +33,7 @@ router.get("/reports", requireAuth, async (req, res) => {
       .from(healthReportsTable)
       .where(eq(healthReportsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list reports failed");
     res.status(500).json({ error: "Failed to fetch reports" });

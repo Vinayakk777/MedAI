@@ -114,7 +114,7 @@ router.get("/conversations", requireAuth, async (req, res) => {
       .from(conversationsTable)
       .where(eq(conversationsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list conversations failed");
     res.status(500).json({ error: "Failed to fetch conversations" });

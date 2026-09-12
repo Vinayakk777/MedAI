@@ -33,7 +33,7 @@ router.get("/referrals", requireAuth, async (req, res) => {
       .from(referralsTable)
       .where(and(eq(referralsTable.userId, userId), eq(referralsTable.isArchived, false)));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list referrals failed");
     res.status(500).json({ error: "Failed to fetch referrals" });

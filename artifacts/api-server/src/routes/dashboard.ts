@@ -488,7 +488,7 @@ router.get("/dashboard/vitals", requireAuth, async (req, res) => {
       .from(vitalsTable)
       .where(eq(vitalsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list vitals failed");
     res.status(500).json({ error: "Failed to fetch vitals" });
@@ -549,7 +549,7 @@ router.get("/dashboard/metrics", requireAuth, async (req, res) => {
       .from(healthMetricsTable)
       .where(eq(healthMetricsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list metrics failed");
     res.status(500).json({ error: "Failed to fetch metrics" });
@@ -610,7 +610,7 @@ router.get("/dashboard/medications", requireAuth, async (req, res) => {
       .from(medicationsTable)
       .where(eq(medicationsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list medications failed");
     res.status(500).json({ error: "Failed to fetch medications" });
@@ -709,7 +709,7 @@ router.get("/dashboard/reports", requireAuth, async (req, res) => {
       .from(healthReportsTable)
       .where(eq(healthReportsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list reports failed");
     res.status(500).json({ error: "Failed to fetch reports" });
@@ -770,7 +770,7 @@ router.get("/dashboard/risk-assessments", requireAuth, async (req, res) => {
       .from(riskAssessmentsTable)
       .where(eq(riskAssessmentsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list risk assessments failed");
     res.status(500).json({ error: "Failed to fetch risk assessments" });
@@ -831,7 +831,7 @@ router.get("/dashboard/symptom-logs", requireAuth, async (req, res) => {
       .from(symptomLogsTable)
       .where(eq(symptomLogsTable.userId, userId));
 
-    res.json({ data: rows, total, limit, offset });
+    res.json(rows);
   } catch (err) {
     (req as any).log.error({ err }, "list symptom logs failed");
     res.status(500).json({ error: "Failed to fetch symptom logs" });

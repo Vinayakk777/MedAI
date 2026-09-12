@@ -448,14 +448,14 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       model: hasImages ? config.visionModel : config.chatModel,
       signal: streamController.signal,
       callbacks: {
-        onChunk: (chunk) => {
+        onChunk: (chunk: { content: string }) => {
           fullResponse += chunk.content;
           res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
         },
-        onDone: (_fullText, usage) => {
+        onDone: (_fullText: string, usage: Record<string, unknown>) => {
           streamUsage = usage;
         },
-        onError: (err) => {
+        onError: (err: unknown) => {
           streamErrorMsg = err instanceof Error ? err.message : String(err);
         },
       },

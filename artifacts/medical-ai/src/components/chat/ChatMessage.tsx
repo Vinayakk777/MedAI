@@ -195,13 +195,13 @@ export function ChatMessage({ message, isLatest, onRetry }: ChatMessageProps) {
             {formatTime(message.timestamp)}
           </span>
           {!isUser && (
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               {speech.supported && !message.isError && (
                 <button
                   onClick={toggleSpeak}
                   aria-label={speakerLabel}
                   title={speakerLabel}
-                  className={`p-1 rounded-md transition-all ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
                     isSpeakingThis
                       ? "text-primary bg-primary/10"
                       : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/5"
@@ -212,6 +212,7 @@ export function ChatMessage({ message, isLatest, onRetry }: ChatMessageProps) {
                   ) : (
                     <Volume2 className="w-3 h-3" />
                   )}
+                  <span>{isSpeakingThis ? (speech.paused ? "Resume" : "Pause") : "Listen"}</span>
                 </button>
               )}
               {isSpeakingThis && <SpeakingEqualizer />}

@@ -160,6 +160,7 @@ function keepAlive() {
 // Returns reader-friendly plain text for TTS: strips markdown formatting
 // (bold/italic/headers/lists/code/links/images) so the voice does NOT read
 // symbols like ** or #. Only human-readable words are spoken.
+// Also converts medical abbreviations into natural spoken language.
 function stripMarkdownForSpeech(text: string): string {
   if (!text) return "";
 
@@ -198,8 +199,47 @@ function stripMarkdownForSpeech(text: string): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  // Remove any leading/trailing colon+asterisk artifacts like "**Consultation Summary**"
+  // Convert medical abbreviations to natural spoken language
+  t = convertMedicalAbbreviations(t);
+
   return t;
+}
+
+// Convert medical abbreviations and symbols into natural spoken language
+function convertMedicalAbbreviations(text: string): string {
+  return text
+    // Heart rate: "82 bpm" -> "82 beats per minute"
+    .replace(/(\d+)\s*bpm/gi, "$1 beats per minute")
+    // Blood pressure: "120/80 mmHg" -> "120 over 80 millimeters of mercury"
+    .replace(/(\d+\/\d+)\s*mmHg/gi, (_, bp) => {
+      const [sys, dia] = bp.split("/");
+      return `${sys} over ${dia} millimeters of mercury`;
+    })
+    // Oxygen saturation: "98% SpO2" or "98% SpO₂" -> "98 percent oxygen saturation"
+    .replace(/(\d+)%?\s*SpO[₂2]/gi, "$1 percent oxygen saturation")
+    .replace(/SpO[₂2]\s*(\d+)%?/gi, "$1 percent oxygen saturation")
+    // Temperature: "37.0°C" -> "37 degrees Celsius" / "98.6°F" -> "98.6 degrees Fahrenheit"
+    .replace(/(\d+\.?\d*)°C/gi, "$1 degrees Celsius")
+    .replace(/(\d+\.?\d*)°F/gi, "$1 degrees Fahrenheit")
+    // Blood glucose: "95 mg/dL" -> "95 milligrams per deciliter"
+    .replace(/(\d+\.?\d*)\s*mg\/dL/gi, "$1 milligrams per deciliter")
+    // Weight: "73 kg" -> "73 kilograms"
+    .replace(/(\d+\.?\d*)\s*kg/gi, "$1 kilograms")
+    // Height: "175 cm" -> "175 centimeters"
+    .replace(/(\d+\.?\d*)\s*cm/gi, "$1 centimeters")
+    // BMI: "BMI 24.5" -> "B M I 24.5" (keep readable)
+    .replace(/\bBMI\b/gi, "B M I")
+    // Common medical terms - keep simple for TTS
+    .replace(/\bHR\b/gi, "heart rate")
+    .replace(/\bBP\b/gi, "blood pressure")
+    .replace(/\bRR\b/gi, "respiratory rate")
+    .replace(/\bO2\b/gi, "oxygen")
+    // Remove warning/recommendation symbols but keep text
+    .replace(/[✓✔]\s*/g, "")
+    .replace(/[⚠🚨]\s*/g, "")
+    // Clean up extra spaces
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function stopSpeech() {
@@ -230,8 +270,9 @@ function speakSpeech(id: string, text: string) {
   const voice = pickVoice();
   if (voice) utterance.voice = voice;
   utterance.lang = voice?.lang ?? "en-US";
-  utterance.rate = 1.0;
+  utterance.rate = 0.9;   // Slightly slower for calm, measured delivery
   utterance.pitch = 1.0;
+  utterance.volume = 1.0;
 
   utterance.onend = () => {
     currentUtterance = null;

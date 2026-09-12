@@ -1,3 +1,9 @@
+import {
+  Heart, Activity, Thermometer, Wind, Droplets, Scale,
+  FlaskConical, Pill, ClipboardList, AlertTriangle,
+  CheckCircle, Stethoscope, Shield, Clock,
+} from "lucide-react";
+
 type InlineNode =
   | { type: "text"; value: string }
   | { type: "bold"; value: string }
@@ -47,6 +53,45 @@ type Block =
   | { type: "codeblock"; code: string; lang?: string }
   | { type: "blockquote"; text: string }
   | { type: "divider" };
+
+const CALLOUT_ICONS: Record<string, React.ElementType> = {
+  "assessment": Stethoscope,
+  "warning": AlertTriangle,
+  "caution": AlertTriangle,
+  "emergency": AlertTriangle,
+  "recommendation": CheckCircle,
+  "recommend": CheckCircle,
+  "do": CheckCircle,
+  "tip": Shield,
+  "heart rate": Heart,
+  "heart": Heart,
+  "blood pressure": Activity,
+  "bp": Activity,
+  "temperature": Thermometer,
+  "temp": Thermometer,
+  "respiratory": Wind,
+  "respiratory rate": Wind,
+  "spo2": Droplets,
+  "oxygen": Droplets,
+  "oxygen saturation": Droplets,
+  "weight": Scale,
+  "bmi": Scale,
+  "blood glucose": FlaskConical,
+  "glucose": FlaskConical,
+  "medication": Pill,
+  "symptoms": ClipboardList,
+  "when to seek": Clock,
+  "seek care": Clock,
+  "seek": Clock,
+};
+
+function getCalloutIcon(text: string): React.ElementType | null {
+  const lower = text.toLowerCase();
+  for (const [key, Icon] of Object.entries(CALLOUT_ICONS)) {
+    if (lower.includes(key)) return Icon;
+  }
+  return null;
+}
 
 function parseBlocks(content: string): Block[] {
   const lines = content.split("\n");
@@ -145,25 +190,71 @@ export function MarkdownContent({ content }: MarkdownContentProps) {
         const key = `block-${idx}`;
         switch (block.type) {
           case "heading": {
-            const cls =
-              block.level === 1
-                ? "text-base font-bold text-foreground mt-1"
-                : block.level === 2
-                  ? "text-sm font-semibold text-foreground mt-1"
-                  : "text-sm font-semibold text-foreground/90 mt-0.5";
-            return <p key={key} className={cls}>{renderInline(block.text, key)}</p>;
+            const Icon = getCalloutIcon(block.text);
+            if (block.level === 1) {
+              return (
+                <p key={key} className="text-base font-bold text-foreground mt-1 flex items-center gap-2">
+                  {Icon && <Icon className="w-4 h-4 text-primary/70" />}
+                  {renderInline(block.text, key)}
+                </p>
+              );
+            }
+            if (block.level === 2) {
+              const isWarning = /warning|emergency|caution|seek care|when to seek/i.test(block.text);
+              return (
+                <div key={key} className={`flex items-center gap-2 text-sm font-semibold mt-2 px-2 py-1 rounded-lg ${
+                  isWarning ? "text-amber-400 bg-amber-500/8" : "text-foreground"
+                }`}>
+                  {Icon ? (
+                    <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isWarning ? "text-amber-400" : "text-primary/70"}`} />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 flex-shrink-0" />
+                  )}
+                  {renderInline(block.text, key)}
+                </div>
+              );
+            }
+            return (
+              <p key={key} className="text-sm font-semibold text-foreground/90 mt-0.5 flex items-center gap-1.5">
+                {Icon && <Icon className="w-3 h-3 text-primary/60" />}
+                {renderInline(block.text, key)}
+              </p>
+            );
           }
-          case "paragraph":
-            return <p key={key} className="text-muted-foreground">{renderInline(block.text, key)}</p>;
+          case "paragraph": {
+            const text = block.text;
+            const isWarning = /^⚠|warning|emergency|urgent|seek care|seek medical/i.test(text);
+            const isRecommendation = /^✓|recommend|next step|what you can do/i.test(text);
+            const Icon = isWarning ? AlertTriangle : isRecommendation ? CheckCircle : null;
+
+            if (isWarning || isRecommendation) {
+              return (
+                <div key={key} className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${
+                  isWarning
+                    ? "border border-amber-500/20 bg-amber-500/5 text-amber-200/80"
+                    : "border border-emerald-500/20 bg-emerald-500/5 text-emerald-200/80"
+                }`}>
+                  {Icon && <Icon className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isWarning ? "text-amber-400" : "text-emerald-400"}`} />}
+                  <span>{renderInline(text.replace(/^[✓⚠]\s*/, ""), key)}</span>
+                </div>
+              );
+            }
+            return <p key={key} className="text-muted-foreground">{renderInline(text, key)}</p>;
+          }
           case "bullet":
             return (
               <ul key={key} className="space-y-1.5 pl-1">
-                {block.items.map((item, ii) => (
-                  <li key={ii} className="flex items-start gap-2 text-muted-foreground">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-primary/60 flex-shrink-0" />
-                    <span>{renderInline(item, `${key}-${ii}`)}</span>
-                  </li>
-                ))}
+                {block.items.map((item, ii) => {
+                  const isWarning = /⚠|warning|emergency|urgent|seek/i.test(item);
+                  return (
+                    <li key={ii} className="flex items-start gap-2 text-muted-foreground">
+                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                        isWarning ? "bg-amber-400" : "bg-primary/60"
+                      }`} />
+                      <span>{renderInline(item, `${key}-${ii}`)}</span>
+                    </li>
+                  );
+                })}
               </ul>
             );
           case "ordered":

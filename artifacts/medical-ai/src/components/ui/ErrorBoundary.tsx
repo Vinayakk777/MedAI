@@ -37,8 +37,10 @@ class ErrorBoundaryClass extends React.Component<React.PropsWithChildren<{ fallb
             An unexpected error occurred. Your data is safe — refresh the page to continue.
           </p>
           {this.state.error && (
-            <pre className="text-left text-[10px] bg-card border border-white/5 rounded-xl p-4 text-rose-400/80 overflow-auto mb-6 max-h-32">
+            <pre className="text-left text-[10px] bg-card border border-white/5 rounded-xl p-4 text-rose-400/80 overflow-auto mb-6 max-h-48">
               {this.state.error.message}
+              {"\n\n"}
+              {this.state.error.stack}
             </pre>
           )}
           <button

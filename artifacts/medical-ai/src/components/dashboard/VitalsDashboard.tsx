@@ -7,11 +7,12 @@ import {
 } from "recharts";
 import {
   Heart, Wind, Thermometer, Droplets, Scale, Activity,
-  AlertTriangle, TrendingUp, TrendingDown, Minus, Brain,
+  AlertTriangle, TrendingUp, Brain,
   ClipboardList, Gauge, FlaskConical, Syringe,
-  ChevronDown, ChevronUp, Plus,
+  ChevronDown, ChevronUp, Plus, Smartphone,
 } from "lucide-react";
 import { ManualVitalsForm } from "./ManualVitalsForm";
+import { GoogleFitSync } from "./GoogleFitSync";
 
 type Severity = "normal" | "mildly_abnormal" | "moderately_abnormal" | "critical";
 
@@ -84,21 +85,28 @@ const vitalCardDefs: { key: keyof VitalsAnalysis; icon: React.ElementType; label
   { key: "painScore", icon: Syringe, label: "Pain Score" },
 ];
 
-function CustomTooltip({ active, payload, label, unit }: any) {
+const sourceLabels: Record<string, string> = {
+  manual: "Manual",
+  google_fit: "Google Fit",
+  google_health: "Google Health",
+  demo: "Demo",
+};
+
+function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-card/95 border border-white/10 rounded-xl px-3 py-2.5 shadow-xl text-xs">
       <p className="text-muted-foreground font-medium mb-1">{label}</p>
-      <p className="text-foreground font-bold">{payload[0]?.value} <span className="text-muted-foreground font-normal">{unit}</span></p>
+      <p className="text-foreground font-bold">{payload[0]?.value}</p>
     </div>
   );
 }
 
 export function VitalsDashboard() {
   const [range, setRange] = useState("month");
-  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [selectedMetric, setSelectedMetric] = useState("heartRate");
   const [showDisclaimer, setShowDisclaimer] = useState(false);
-  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [entryMode, setEntryMode] = useState<"none" | "manual" | "google_fit">("none");
 
   const { data: insights, isLoading: insightsLoading } = useQuery<VitalsInsightsResult>({
     queryKey: ["dashboard", "vitals", "analysis"],
@@ -112,8 +120,7 @@ export function VitalsDashboard() {
 
   const { data: trendData } = useQuery<any[]>({
     queryKey: ["dashboard", "vitals", "trends", range, selectedMetric],
-    queryFn: () => fetch(`/api/dashboard/vitals/trends?range=${range}${selectedMetric ? `&metric=${selectedMetric}` : ""}`).then((r) => r.json()),
-    enabled: !!selectedMetric,
+    queryFn: () => fetch(`/api/dashboard/vitals/trends?range=${range}&metric=${selectedMetric}`).then((r) => r.json()),
   });
 
   const loading = insightsLoading || historyLoading;
@@ -136,28 +143,50 @@ export function VitalsDashboard() {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
 
-      {/* LOG VITALS BUTTON - ALWAYS VISIBLE */}
+      {/* LOG VITALS - DUAL OPTION */}
       <div className="rounded-2xl border border-emerald-500/30 bg-[#0f1117] p-4">
         <button
-          onClick={() => setShowManualEntry(!showManualEntry)}
+          onClick={() => setEntryMode(entryMode === "none" ? "manual" : "none")}
           className="w-full flex items-center justify-between"
         >
           <div className="flex items-center gap-2">
             <Plus className="w-5 h-5 text-emerald-400" />
             <span className="text-sm font-semibold text-white">Log Vital Signs</span>
           </div>
-          {showManualEntry ? (
+          {entryMode !== "none" ? (
             <ChevronUp className="w-4 h-4 text-white/40" />
           ) : (
             <ChevronDown className="w-4 h-4 text-white/40" />
           )}
         </button>
         <p className="text-[11px] text-white/40 mt-1 text-left">Enter blood sugar, BP, heart rate, temperature, and more. AI will analyze if your readings are safe.</p>
+
+        {entryMode === "none" && (
+          <div className="flex gap-3 mt-3">
+            <button
+              onClick={(e) => { e.stopPropagation(); setEntryMode("manual"); }}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/15 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Enter Manually
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setEntryMode("google_fit"); }}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/15 transition-colors"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              Sync Google Fit
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* MANUAL ENTRY FORM - DIRECTLY RENDERED */}
-      {showManualEntry && (
-        <ManualVitalsForm onDone={() => setShowManualEntry(false)} />
+      {/* ENTRY FORMS */}
+      {entryMode === "manual" && (
+        <ManualVitalsForm onDone={() => setEntryMode("none")} />
+      )}
+      {entryMode === "google_fit" && (
+        <GoogleFitSync onDone={() => setEntryMode("none")} />
       )}
 
       {/* DEMO DATA WARNING */}
@@ -219,7 +248,16 @@ export function VitalsDashboard() {
               <Heart className="w-4 h-4 text-rose-400" />
               <h3 className="text-sm font-semibold text-foreground">Current Vitals</h3>
             </div>
-            <span className="text-[10px] text-muted-foreground/50">Last: {history?.[0]?.recordedAt ? new Date(history[0].recordedAt).toLocaleString() : "N/A"}</span>
+            <div className="flex items-center gap-3">
+              {history?.[0]?.source && (
+                <span className="text-[10px] text-muted-foreground/40 bg-white/5 border border-white/8 px-2 py-0.5 rounded-full">
+                  Source: {sourceLabels[history[0].source] ?? history[0].source}
+                </span>
+              )}
+              <span className="text-[10px] text-muted-foreground/50">
+                Last: {history?.[0]?.recordedAt ? new Date(history[0].recordedAt).toLocaleString() : "N/A"}
+              </span>
+            </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {vitalCardDefs.map((def) => {
@@ -264,11 +302,11 @@ export function VitalsDashboard() {
           </div>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <select
-              value={selectedMetric ?? ""}
-              onChange={e => setSelectedMetric(e.target.value || null)}
+              value={selectedMetric}
+              onChange={e => setSelectedMetric(e.target.value)}
               className="bg-background/60 border border-white/8 rounded-lg text-[11px] text-muted-foreground px-2 py-1.5 focus:outline-none focus:border-primary/30"
             >
-              <option value="">Heart Rate</option>
+              <option value="heartRate">Heart Rate</option>
               <option value="systolic">Systolic BP</option>
               <option value="diastolic">Diastolic BP</option>
               <option value="temperature">Temperature</option>
@@ -287,9 +325,9 @@ export function VitalsDashboard() {
           </div>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={(trendData ?? (history ?? []).slice().reverse().slice(-14)).map((r: any) => ({
+              <AreaChart data={(trendData ?? []).map((r: any) => ({
                 day: new Date(r.date || r.recordedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-                value: r.value ?? r.heartRate ?? 0,
+                value: r.value ?? 0,
               }))}>
                 <defs>
                   <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
@@ -300,7 +338,7 @@ export function VitalsDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="day" tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }} />
                 <YAxis tick={{ fontSize: 10, fill: "rgba(255,255,255,0.3)" }} />
-                <Tooltip content={<CustomTooltip unit="" />} />
+                <Tooltip content={<CustomTooltip />} />
                 <Area type="monotone" dataKey="value" stroke="#06b6d4" fill="url(#colorValue)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>

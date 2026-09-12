@@ -501,44 +501,91 @@ router.post("/dashboard/vitals", requireAuth, async (req, res) => {
   const body = req.body as Record<string, any>;
 
   const vitalData: Record<string, any> = { userId, source: body.source ?? "manual" };
-  if (body.heartRate != null) vitalData.heartRate = body.heartRate;
-  if (body.systolic != null) vitalData.systolic = body.systolic;
-  if (body.diastolic != null) vitalData.diastolic = body.diastolic;
-  if (body.respiratoryRate != null) vitalData.respiratoryRate = body.respiratoryRate;
-  if (body.temperature != null) vitalData.temperature = body.temperature;
-  if (body.oxygenSaturation != null) vitalData.oxygenSaturation = body.oxygenSaturation;
-  if (body.bloodGlucose != null) vitalData.bloodGlucose = body.bloodGlucose;
-  if (body.weight != null) vitalData.weight = body.weight;
-  if (body.height != null) vitalData.height = body.height;
-  if (body.bmi != null) vitalData.bmi = body.bmi;
-  if (body.painScore != null) vitalData.painScore = body.painScore;
+  if (body.heartRate != null) vitalData.heartRate = Math.round(Number(body.heartRate));
+  if (body.systolic != null) vitalData.systolic = Math.round(Number(body.systolic));
+  if (body.diastolic != null) vitalData.diastolic = Math.round(Number(body.diastolic));
+  if (body.respiratoryRate != null) vitalData.respiratoryRate = Math.round(Number(body.respiratoryRate));
+  if (body.temperature != null) vitalData.temperature = Number(body.temperature);
+  if (body.oxygenSaturation != null) vitalData.oxygenSaturation = Math.round(Number(body.oxygenSaturation));
+  if (body.bloodGlucose != null) vitalData.bloodGlucose = Number(body.bloodGlucose);
+  if (body.weight != null) vitalData.weight = Number(body.weight);
+  if (body.height != null) vitalData.height = Number(body.height);
+  if (body.bmi != null) vitalData.bmi = Number(body.bmi);
+  if (body.painScore != null) vitalData.painScore = Math.round(Number(body.painScore));
+  if (body.recordedAt) vitalData.recordedAt = new Date(body.recordedAt);
 
-  const hasAny = Object.keys(vitalData).some(k => k !== "userId" && k !== "source" && vitalData[k] != null);
+  const hasAny = Object.keys(vitalData).some(k => k !== "userId" && k !== "source" && k !== "recordedAt" && vitalData[k] != null);
   if (!hasAny) {
     res.status(400).json({ error: "No vitals provided" });
     return;
   }
 
   try {
-    const [row] = await db
-      .insert(vitalsTable)
-      .values(vitalData as any)
-      .returning();
-
-    // Also save to health_metrics for dashboard tracking
-    const metricData: Record<string, any> = { userId, source: vitalData.source };
-    if (vitalData.heartRate != null) metricData.heartRate = vitalData.heartRate;
-    if (vitalData.weight != null) metricData.weight = vitalData.weight;
-    if (vitalData.height != null) metricData.height = vitalData.height;
-
-    if (Object.keys(metricData).length > 2) {
-      try { await db.insert(healthMetricsTable).values(metricData as any); } catch {}
-    }
-
+    const [row] = await db.insert(vitalsTable).values(vitalData as any).returning();
     res.status(201).json(row);
   } catch (err) {
     (req as any).log.error({ err }, "create vital failed");
     res.status(500).json({ error: "Failed to create vital" });
+  }
+});
+
+router.post("/dashboard/vitals/sync-google-fit", requireAuth, async (req, res) => {
+  const { userId } = req as AuthRequest;
+  const { config } = req.body as { config?: { accessToken?: string; refreshToken?: string; expiresAt?: number } };
+
+  if (!config?.accessToken) {
+    res.status(400).json({ error: "Google Fit isn't connected yet. Connect Google Fit to import your available health data." });
+    return;
+  }
+
+  const provider = getProvider("google_fit");
+  if (!provider) {
+    res.status(400).json({ error: "Google Fit integration is not available." });
+    return;
+  }
+
+  try {
+    const vitals = await provider.fetchLatestVitals(config);
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+
+    const existingToday = await db
+      .select()
+      .from(vitalsTable)
+      .where(and(eq(vitalsTable.userId, userId), eq(vitalsTable.source, "google_fit")))
+      .orderBy(desc(vitalsTable.recordedAt))
+      .limit(1);
+
+    if (existingToday[0]) {
+      const lastDate = existingToday[0].recordedAt.toISOString().slice(0, 10);
+      if (lastDate === today) {
+        res.json({ synced: 0, message: "Already synced today. Data is up to date." });
+        return;
+      }
+    }
+
+    const vitalData: Record<string, any> = { userId, source: "google_fit", recordedAt: now };
+    if (vitals.heartRate != null) vitalData.heartRate = Math.round(vitals.heartRate);
+    if (vitals.systolic != null) vitalData.systolic = Math.round(vitals.systolic);
+    if (vitals.diastolic != null) vitalData.diastolic = Math.round(vitals.diastolic);
+    if (vitals.respiratoryRate != null) vitalData.respiratoryRate = Math.round(vitals.respiratoryRate);
+    if (vitals.temperature != null) vitalData.temperature = vitals.temperature;
+    if (vitals.oxygenSaturation != null) vitalData.oxygenSaturation = Math.round(vitals.oxygenSaturation);
+    if (vitals.bloodGlucose != null) vitalData.bloodGlucose = vitals.bloodGlucose;
+    if (vitals.weight != null) vitalData.weight = vitals.weight;
+    if (vitals.height != null) vitalData.height = vitals.height;
+
+    const hasAny = Object.keys(vitalData).some(k => !["userId", "source", "recordedAt"].includes(k) && vitalData[k] != null);
+    if (!hasAny) {
+      res.json({ synced: 0, message: "No health data was available from Google Fit." });
+      return;
+    }
+
+    const [row] = await db.insert(vitalsTable).values(vitalData as any).returning();
+    res.status(201).json({ synced: 1, vital: row, source: "google_fit" });
+  } catch (err) {
+    (req as any).log.error({ err }, "google fit sync failed");
+    res.status(500).json({ error: "Unable to sync Google Fit right now. Please try again." });
   }
 });
 

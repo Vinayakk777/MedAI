@@ -543,60 +543,90 @@ router.post("/dashboard/vitals", requireAuth, async (req, res) => {
 });
 
 router.post("/dashboard/vitals/analyze", requireAuth, async (req, res) => {
-  const { heartRate, systolic, diastolic, respiratoryRate, temperature, oxygenSaturation, bloodGlucose, weight, height, painScore, notes } = req.body;
+  const { heartRate, systolic, diastolic, respiratoryRate, temperature, oxygenSaturation, bloodGlucose, weight, height, painScore } = req.body;
 
-  const readings: string[] = [];
-  if (heartRate != null) readings.push(`Heart Rate: ${heartRate} bpm`);
-  if (systolic != null && diastolic != null) readings.push(`Blood Pressure: ${systolic}/${diastolic} mmHg`);
-  else if (systolic != null) readings.push(`Systolic BP: ${systolic} mmHg`);
-  if (respiratoryRate != null) readings.push(`Respiratory Rate: ${respiratoryRate} breaths/min`);
-  if (temperature != null) readings.push(`Temperature: ${temperature}°F`);
-  if (oxygenSaturation != null) readings.push(`SpO₂: ${oxygenSaturation}%`);
-  if (bloodGlucose != null) readings.push(`Blood Glucose: ${bloodGlucose} mg/dL`);
-  if (weight != null) readings.push(`Weight: ${weight} lbs`);
-  if (height != null) readings.push(`Height: ${height} inches`);
-  if (painScore != null) readings.push(`Pain Score: ${painScore}/10`);
-  if (notes) readings.push(`Notes: ${notes}`);
-
-  if (readings.length === 0) {
-    res.status(400).json({ error: "No vitals provided" });
-    return;
+  function analyzeReading(metric: string, value: number, ranges: { normal: [number, number]; caution: [number, number]; warning: [number, number] }): { status: string; explanation: string } {
+    const [nLow, nHigh] = ranges.normal;
+    const [cLow, cHigh] = ranges.caution;
+    const [wLow, wHigh] = ranges.warning;
+    if (value >= nLow && value <= nHigh) return { status: "normal", explanation: `${metric} is within the healthy range (${nLow}–${nHigh}).` };
+    if (value >= cLow && value <= cHigh) return { status: "caution", explanation: `${metric} is slightly outside the normal range. Monitor it over the next few days.` };
+    if (value >= wLow && value <= wHigh) return { status: "warning", explanation: `${metric} is significantly abnormal. Consider consulting a healthcare professional.` };
+    return { status: "critical", explanation: `${metric} is dangerously outside normal range. Seek medical attention immediately.` };
   }
 
-  const result = await llm.generateJSON<{
-    summary: string;
-    riskLevel: "normal" | "caution" | "warning" | "critical";
-    findings: { metric: string; value: string; status: "normal" | "caution" | "warning" | "critical"; explanation: string }[];
-    recommendations: string[];
-    seekMedicalAttention: boolean;
-  }>({
-    systemPrompt: `You are a medical AI assistant. Analyze the following vital sign readings and provide:
-1. A one-line summary of overall health status
-2. A risk level: "normal" (all within healthy range), "caution" (mildly outside normal, monitor), "warning" (significantly abnormal, see doctor soon), or "critical" (dangerously abnormal, seek emergency care)
-3. Individual findings for each metric with status and explanation
-4. Practical recommendations (lifestyle, when to see a doctor)
-5. Whether to seek immediate medical attention (true/false)
+  const findings: { metric: string; value: string; status: string; explanation: string }[] = [];
+  let worstStatus = "normal";
+  const statusOrder = ["normal", "caution", "warning", "critical"];
 
-Normal adult ranges:
-- Heart Rate: 60-100 bpm (resting)
-- Systolic BP: 90-120 mmHg, Diastolic BP: 60-80 mmHg
-- Respiratory Rate: 12-20 breaths/min
-- Temperature: 97-99°F (36.1-37.2°C)
-- SpO₂: 95-100%
-- Blood Glucose (fasting): 70-99 mg/dL (normal), 100-125 (prediabetes), 126+ (diabetes)
-- BMI: 18.5-24.9 (normal), 25-29.9 (overweight), 30+ (obese)
-- Pain Score: 0-3 (mild), 4-6 (moderate), 7-10 (severe)
+  if (heartRate != null) {
+    const r = analyzeReading("Heart Rate", heartRate, { normal: [60, 100], caution: [50, 110], warning: [40, 120] });
+    findings.push({ metric: "Heart Rate", value: `${heartRate} bpm`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (systolic != null) {
+    const r = analyzeReading("Systolic BP", systolic, { normal: [90, 120], caution: [80, 130], warning: [70, 140] });
+    findings.push({ metric: "Systolic BP", value: `${systolic} mmHg`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (diastolic != null) {
+    const r = analyzeReading("Diastolic BP", diastolic, { normal: [60, 80], caution: [50, 90], warning: [40, 100] });
+    findings.push({ metric: "Diastolic BP", value: `${diastolic} mmHg`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (respiratoryRate != null) {
+    const r = analyzeReading("Respiratory Rate", respiratoryRate, { normal: [12, 20], caution: [10, 24], warning: [8, 28] });
+    findings.push({ metric: "Respiratory Rate", value: `${respiratoryRate} /min`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (temperature != null) {
+    const r = analyzeReading("Temperature", temperature, { normal: [97, 99], caution: [96, 100], warning: [95, 103] });
+    findings.push({ metric: "Temperature", value: `${temperature}°F`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (oxygenSaturation != null) {
+    const r = analyzeReading("SpO₂", oxygenSaturation, { normal: [95, 100], caution: [92, 94], warning: [88, 91] });
+    findings.push({ metric: "SpO₂", value: `${oxygenSaturation}%`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (bloodGlucose != null) {
+    const r = analyzeReading("Blood Glucose", bloodGlucose, { normal: [70, 99], caution: [100, 125], warning: [126, 200] });
+    findings.push({ metric: "Blood Glucose", value: `${bloodGlucose} mg/dL`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
+  if (painScore != null) {
+    const r = analyzeReading("Pain Score", painScore, { normal: [0, 3], caution: [4, 6], warning: [7, 10] });
+    findings.push({ metric: "Pain Score", value: `${painScore}/10`, ...r });
+    if (statusOrder.indexOf(r.status) > statusOrder.indexOf(worstStatus)) worstStatus = r.status;
+  }
 
-Be thorough but concise. This is NOT a diagnosis — always recommend consulting a healthcare professional.`,
-    userContent: `Analyze these vitals:\n${readings.join("\n")}`,
-    temperature: 0.3,
+  const summaries: Record<string, string> = {
+    normal: "All your vital signs are within healthy ranges. Keep up the good work!",
+    caution: "Some vitals are slightly outside normal range. Monitor them over the next few days.",
+    warning: "Some vitals are significantly abnormal. Consider scheduling a doctor visit.",
+    critical: "One or more vitals are dangerously abnormal. Seek medical attention immediately.",
+  };
+
+  const recommendations: string[] = [];
+  if (worstStatus === "normal") {
+    recommendations.push("Continue your current healthy lifestyle.");
+    recommendations.push("Regular monitoring is recommended — check vitals weekly.");
+  } else {
+    if (heartRate != null && (heartRate > 100 || heartRate < 60)) recommendations.push("Rest and avoid strenuous activity until heart rate normalizes.");
+    if (systolic != null && systolic > 120) recommendations.push("Reduce sodium intake and manage stress to help lower blood pressure.");
+    if (bloodGlucose != null && bloodGlucose > 100) recommendations.push("Limit sugary foods and consider a fasting glucose test.");
+    if (temperature != null && temperature > 99) recommendations.push("Stay hydrated and rest. If fever persists beyond 48 hours, see a doctor.");
+    if (oxygenSaturation != null && oxygenSaturation < 95) recommendations.push("If you feel short of breath, seek medical attention promptly.");
+    if (painScore != null && painScore > 6) recommendations.push("Consider pain management options and consult your doctor if pain persists.");
+  }
+
+  res.json({
+    summary: summaries[worstStatus],
+    riskLevel: worstStatus,
+    findings,
+    recommendations,
+    seekMedicalAttention: worstStatus === "critical",
   });
-
-  if (!result.data) {
-    res.status(500).json({ error: "AI analysis failed" });
-    return;
-  }
-  res.json(result.data);
 });
 
 router.delete("/dashboard/vitals/:id", requireAuth, async (req, res) => {

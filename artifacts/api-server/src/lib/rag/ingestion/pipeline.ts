@@ -30,6 +30,7 @@ export class IngestionPipeline {
     version?: string;
     tags?: string[];
     url?: string;
+    author?: string;
     metadata?: Record<string, unknown>;
     chunkerName?: string;
     chunkOptions?: { maxChunkSize?: number; chunkOverlap?: number };
@@ -37,6 +38,25 @@ export class IngestionPipeline {
     const chunker = getChunker(params.chunkerName ?? "recursive_character");
     if (!chunker) {
       return { documentId: "", title: params.title, chunkCount: 0, success: false, error: "Unknown chunker" };
+    }
+
+    // Duplicate detection: check if a document with the same title and organization already exists
+    const pmcid = params.metadata?.pmcid as string | undefined;
+    const existingChecksum = pmcid ? `pmcid:${pmcid}` : undefined;
+    if (existingChecksum) {
+      const [existing] = await db
+        .select({ id: medicalDocumentsTable.id, chunkCount: medicalDocumentsTable.chunkCount })
+        .from(medicalDocumentsTable)
+        .where(eq(medicalDocumentsTable.checksum, existingChecksum))
+        .limit(1);
+      if (existing) {
+        return {
+          documentId: existing.id,
+          title: params.title,
+          chunkCount: existing.chunkCount ?? 0,
+          success: true,
+        };
+      }
     }
 
     // Create document record
@@ -53,7 +73,9 @@ export class IngestionPipeline {
         version: params.version ?? null,
         tags: params.tags ?? [],
         url: params.url ?? null,
+        author: params.author ?? null,
         metadata: params.metadata ?? {},
+        checksum: pmcid ? `pmcid:${pmcid}` : null,
         isIndexed: false,
       })
       .returning();

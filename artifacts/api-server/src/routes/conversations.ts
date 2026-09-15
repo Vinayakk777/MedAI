@@ -391,6 +391,51 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     const isEmergency = state.escalation?.isEmergency ?? state.symptomAnalysis?.isEmergency ?? false;
     const hasRedFlags = (state.escalation?.redFlags.length ?? state.symptomAnalysis?.emergencyFlags.length ?? 0) > 0;
 
+    // ── Pipeline: Step 2b — RAG medical evidence retrieval (BEFORE stream) ──
+    // RAG evidence must be available when building the system prompt so the LLM
+    // can synthesize retrieved medical literature into its response.
+    let ragCitations: import("../lib/rag/types").CitationEvidence[] = [];
+    if (!isEmergency && content) {
+      try {
+        const ragEngine = getRagEngine();
+
+        // Primary: symptom + clinical context (most relevant for retrieval)
+        const primaryParts: string[] = [];
+        if (state.symptomAnalysis?.primarySymptom?.normalized) {
+          primaryParts.push(state.symptomAnalysis.primarySymptom.normalized);
+        }
+        if (state.symptomAnalysis?.clinicalProfile) {
+          const cp = state.symptomAnalysis.clinicalProfile;
+          const profileParts = [
+            cp.age ? `age ${cp.age}` : "",
+            cp.gender ?? "",
+            ...(cp.medicalHistory ?? []),
+            ...(cp.currentMedications ?? []),
+          ].filter(Boolean);
+          if (profileParts.length > 0) {
+            primaryParts.push(profileParts.join(" "));
+          }
+        }
+
+        const queryText = primaryParts.filter(Boolean).join(" ").trim();
+
+        if (queryText.length > 10) {
+          const { evidenceBlock, citations } = await ragEngine.formatEvidenceForPrompt({
+            text: queryText,
+            userId,
+            pipelineStage: "diagnosis",
+            useCache: true,
+          });
+          state.ragEvidence = evidenceBlock;
+          ragCitations = citations;
+          console.log(`[conversations] RAG evidence retrieved: ${citations.length} citations (query: ${queryText.slice(0, 60)}...)`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[conversations] RAG evidence retrieval failed:", msg);
+      }
+    }
+
     // Build unified system prompt from state (symptom analysis + escalation + history).
     // NOTE: We stream the response FIRST and run the remaining enrichment engines
     // (assessment, validation, confidence, self-care, OTC, remedies, recovery,
@@ -519,6 +564,33 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       }).execute();
     } catch (safetyErr) {
       console.error("[safety] evaluation failed:", safetyErr);
+    }
+
+    // ── Build citation footer from RAG evidence ──
+    if (ragCitations.length > 0) {
+      const uniqueDocs = new Map<string, typeof ragCitations[0]>();
+      for (const c of ragCitations) {
+        if (!uniqueDocs.has(c.documentId)) uniqueDocs.set(c.documentId, c);
+      }
+      const footerLines: string[] = ["", "---", "**Sources used:**"];
+      let idx = 1;
+      for (const [, c] of uniqueDocs) {
+        const parts: string[] = [];
+        if (c.guidelineName) parts.push(c.guidelineName);
+        if (c.journal) parts.push(`*${c.journal}*`);
+        if (c.publicationDate) parts.push(`(${new Date(c.publicationDate).getFullYear()})`);
+        if (c.pmcid) parts.push(`PMCID: ${c.pmcid}`);
+        if (c.sourceUrl) parts.push(c.sourceUrl);
+        footerLines.push(`${idx}. ${parts.join(" — ")}`);
+        idx++;
+      }
+      footerLines.push("");
+      footerLines.push("*This response was grounded in retrieved medical literature. It is informational and is not a diagnosis or personalized medical advice.*");
+      const citationFooter = footerLines.join("\n");
+      fullResponse += citationFooter;
+      state.finalResponse = fullResponse;
+      // Send citation footer as a final content chunk
+      res.write(`data: ${JSON.stringify({ content: citationFooter })}\n\n`);
     }
 
     // ── Persist AI message ──
@@ -771,52 +843,19 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
           console.error("[conversations] memory retrieval failed:", msg);
         }
 
-        // ── Pipeline: Step 15b — RAG medical evidence retrieval ──
-        // Build a focused query for medical evidence retrieval.
-        // Strategy: prioritize the primary symptom + clinical profile,
-        // then add differential diagnoses as secondary context.
-        if (!isEmergency) {
+        // ── Pipeline: Step 15b — Persist RAG citations for observability ──
+        if (ragCitations.length > 0) {
           try {
-            const ragEngine = getRagEngine();
-
-            // Primary: symptom + clinical context (most relevant for retrieval)
-            const primaryParts: string[] = [];
-            if (state.symptomAnalysis?.primarySymptom?.normalized) {
-              primaryParts.push(state.symptomAnalysis.primarySymptom.normalized);
-            }
-            if (state.symptomAnalysis?.clinicalProfile) {
-              // Convert ClinicalProfile object to a searchable string
-              const cp = state.symptomAnalysis.clinicalProfile;
-              const profileParts = [
-                cp.age ? `age ${cp.age}` : "",
-                cp.gender ?? "",
-                ...(cp.medicalHistory ?? []),
-                ...(cp.currentMedications ?? []),
-              ].filter(Boolean);
-              if (profileParts.length > 0) {
-                primaryParts.push(profileParts.join(" "));
-              }
-            }
-
-            // Secondary: top differential diagnoses (for precision)
-            const diagnoses = state.differentialDiagnosis?.conditions
-              .slice(0, 3)
-              .map((c) => c.name) ?? [];
-            const queryText = [...primaryParts, ...diagnoses].filter(Boolean).join(" ").trim();
-
-            if (queryText.length > 10) {
-              const { evidenceBlock } = await ragEngine.formatEvidenceForPrompt({
-                text: queryText,
-                userId,
-                pipelineStage: "diagnosis",
-                useCache: true,
-              });
-              state.ragEvidence = evidenceBlock;
-              console.log(`[conversations] RAG evidence injected (query: ${queryText.slice(0, 60)}...)`);
-            }
+            const citationEngine = new (await import("../lib/rag/retrieval/citationEngine")).CitationEngine();
+            await citationEngine.persistCitations(ragCitations, {
+              userId,
+              conversationId: id,
+              pipelineStage: "diagnosis",
+            });
+            console.log(`[conversations] persisted ${ragCitations.length} RAG citations`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error("[conversations] RAG evidence retrieval failed:", msg);
+            console.error("[conversations] citation persistence failed:", msg);
           }
         }
 

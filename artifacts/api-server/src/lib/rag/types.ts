@@ -145,6 +145,10 @@ export interface CitationEvidence {
   confidence: "high" | "moderate" | "low";
   relevanceScore: number;
   section?: string;
+  author?: string;
+  journal?: string;
+  pmcid?: string;
+  sourceUrl?: string;
 }
 
 export interface CitationGroup {

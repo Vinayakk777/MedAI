@@ -13,6 +13,18 @@ export interface AdminRequest extends Request {
  * Used for system-level admin routes (safety-admin, rag-admin, observability).
  */
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  // Token-based bypass for scripts/automation (e.g., ingestion scripts)
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (adminToken) {
+    const authHeader = req.headers.authorization;
+    if (authHeader === `Bearer ${adminToken}`) {
+      (req as AdminRequest).userId = "admin-token";
+      (req as AdminRequest).clinicianProfile = { id: "admin-token", role: "admin", isActive: true };
+      next();
+      return;
+    }
+  }
+
   // Dev/test-only bypass
   const devUserId = process.env.DEV_AUTH_USER_ID;
   if (devUserId && process.env.NODE_ENV !== "production") {

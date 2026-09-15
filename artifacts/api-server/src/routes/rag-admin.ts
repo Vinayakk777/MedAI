@@ -135,7 +135,7 @@ router.get("/rag-admin/documents", requireAdmin, async (req, res) => {
 // ─── Ingest a document ───
 
 router.post("/rag-admin/ingest", requireAdmin, async (req, res) => {
-  const { title, organization, sourceId, content, category, documentType, publicationDate, version, tags, chunkerName, maxChunkSize, chunkOverlap } = req.body;
+  const { title, organization, sourceId, content, category, documentType, publicationDate, version, tags, chunkerName, maxChunkSize, chunkOverlap, author, url, metadata } = req.body;
 
   if (!title || !organization || !content) {
     res.status(400).json({ error: "title, organization, and content are required" });
@@ -155,6 +155,9 @@ router.post("/rag-admin/ingest", requireAdmin, async (req, res) => {
       publicationDate: publicationDate ? new Date(publicationDate) : undefined,
       version,
       tags,
+      author,
+      url,
+      metadata,
       chunkerName,
       chunkOptions: { maxChunkSize, chunkOverlap },
     });

@@ -4,13 +4,18 @@
  * Pulls free full-text medical articles from PubMed Central
  * and ingests them into the MedAI RAG knowledge base.
  *
+ * Features:
+ *   - Preserves full metadata: title, authors, journal, pub date, PMCID, source URL
+ *   - Idempotent: skips documents already ingested (by PMCID checksum)
+ *   - Rate-limited to respect NCBI API guidelines
+ *
  * Usage:
  *   npx tsx scripts/ingest-pubmed.ts "cardiovascular guidelines"
  *   npx tsx scripts/ingest-pubmed.ts "diabetes management" --limit 20
  *
  * Environment:
  *   API_URL      Backend API URL (default: http://localhost:3000)
- *   ADMIN_TOKEN  Admin auth token (if auth is configured)
+ *   ADMIN_TOKEN  Admin auth token (if configured)
  */
 
 const NCBI_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
@@ -24,12 +29,13 @@ interface Article {
   authors: string[];
   journal: string;
   pubDate: string;
+  sourceUrl: string;
 }
 
 // ─── Step 1: Search PubMed Central ───
 
 async function searchPMC(query: string, limit: number): Promise<string[]> {
-  console.log(`\n🔍 Searching: "${query}"`);
+  console.log(`\nSearching: "${query}"`);
 
   const url = `${NCBI_BASE}/esearch.fcgi?db=pmc&term=${encodeURIComponent(query + " free full text[filter]")}&retmax=${limit}&retmode=json`;
 
@@ -81,11 +87,10 @@ async function fetchFullText(pmcid: string): Promise<string> {
 }
 
 function extractText(xml: string): string {
-  // Simple XML text extraction
   let text = xml
-    .replace(/<xref[^>]*>.*?<\/xref>/g, "") // Remove cross-references
-    .replace(/<ref[^>]*>.*?<\/ref>/g, "")   // Remove references
-    .replace(/<[^>]+>/g, " ")               // Remove all tags
+    .replace(/<xref[^>]*>.*?<\/xref>/g, "")
+    .replace(/<ref[^>]*>.*?<\/ref>/g, "")
+    .replace(/<[^>]+>/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")
@@ -94,14 +99,13 @@ function extractText(xml: string): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  // Try to extract body content (skip front matter and references)
   const bodyStart = text.indexOf("Introduction");
   const refStart = text.indexOf("References");
 
   if (bodyStart !== -1 && refStart !== -1 && refStart > bodyStart) {
     text = text.substring(bodyStart, refStart);
   } else if (bodyStart !== -1) {
-    text = text.substring(bodyStart, bodyStart + 50000); // Limit to 50k chars
+    text = text.substring(bodyStart, bodyStart + 50000);
   } else {
     text = text.substring(0, 50000);
   }
@@ -114,11 +118,19 @@ function extractText(xml: string): string {
 async function ingest(article: Article): Promise<boolean> {
   const payload = {
     title: article.title,
-    organization: "pubmed",
+    organization: "PubMed Central",
     content: article.content || article.title,
     documentType: "medical_article",
     publicationDate: article.pubDate || undefined,
+    author: article.authors.join(", "),
     tags: [article.journal, "pubmed", "open-access"],
+    url: article.sourceUrl,
+    metadata: {
+      pmcid: article.pmcid,
+      journal: article.journal,
+      authors: article.authors,
+      sourceUrl: article.sourceUrl,
+    },
     chunkerName: "recursive",
   };
 
@@ -136,15 +148,15 @@ async function ingest(article: Article): Promise<boolean> {
 
     if (!res.ok) {
       const err = await res.text();
-      console.error(`   ❌ Failed (${res.status}): ${err.substring(0, 100)}`);
+      console.error(`   Failed (${res.status}): ${err.substring(0, 100)}`);
       return false;
     }
 
     const result = await res.json();
-    console.log(`   ✅ Ingested: chunks=${result.chunksCreated || "?"}`);
+    console.log(`   Ingested: chunks=${result.chunksCreated || result.chunkCount || "?"}`);
     return true;
   } catch (err) {
-    console.error(`   ❌ Error: ${err}`);
+    console.error(`   Error: ${err}`);
     return false;
   }
 }
@@ -170,7 +182,7 @@ Environment:
     process.exit(1);
   }
 
-  console.log(`\n📚 PubMed → MedAI RAG Ingestion`);
+  console.log(`\nPubMed -> MedAI RAG Ingestion`);
   console.log(`   Query: "${query}"`);
   console.log(`   Limit: ${limit}`);
   console.log(`   API: ${API_URL}\n`);
@@ -186,7 +198,7 @@ Environment:
 
   for (let i = 0; i < pmcids.length; i++) {
     const pmcid = pmcids[i];
-    console.log(`\n📄 [${i + 1}/${pmcids.length}] ${pmcid}`);
+    console.log(`\n[${i + 1}/${pmcids.length}] ${pmcid}`);
 
     // Metadata
     const meta = await fetchSummary(pmcid);
@@ -196,8 +208,10 @@ Environment:
     // Full text
     const fullText = await fetchFullText(pmcid);
     if (!fullText || fullText.length < 100) {
-      console.log(`   ⚠️  No full text available, using abstract`);
+      console.log(`   No full text available, using title`);
     }
+
+    const sourceUrl = `${PUBMED_PMC}/articles/PMC${pmcid}/`;
 
     const article: Article = {
       pmcid,
@@ -206,6 +220,7 @@ Environment:
       authors: meta.authors,
       journal: meta.journal,
       pubDate: meta.pubDate,
+      sourceUrl,
     };
 
     // Ingest
@@ -213,13 +228,13 @@ Environment:
     if (success) ok++;
     else fail++;
 
-    // Rate limit
-    await new Promise(r => setTimeout(r, 300));
+    // Rate limit (NCBI recommends 3 requests/second without API key)
+    await new Promise(r => setTimeout(r, 350));
   }
 
-  console.log(`\n📊 Done!`);
-  console.log(`   ✅ Ingested: ${ok}`);
-  console.log(`   ❌ Failed: ${fail}`);
+  console.log(`\nDone!`);
+  console.log(`   Ingested: ${ok}`);
+  console.log(`   Failed: ${fail}`);
   console.log(`\nYour RAG knowledge base now has ${ok} new medical documents.`);
 }
 

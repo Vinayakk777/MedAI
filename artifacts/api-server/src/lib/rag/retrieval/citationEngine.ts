@@ -1,5 +1,5 @@
 import { db, medicalDocumentsTable, knowledgeSourcesTable, citationRecordsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { CitationEvidence, CitationGroup, ReRankedResult } from "../types";
 import { RagQuery } from "../types";
 
@@ -22,7 +22,7 @@ export class CitationEngine {
   ): Promise<{ evidenceGroups: CitationGroup[]; citations: CitationEvidence[] }> {
     const documentIds = [...new Set(results.map((r) => r.documentId))];
 
-    // Fetch document metadata for citations
+    // Fetch document metadata for citations (efficient WHERE IN query)
     const docs = documentIds.length > 0
       ? await db
           .select({
@@ -33,10 +33,12 @@ export class CitationEngine {
             version: medicalDocumentsTable.version,
             sourceId: medicalDocumentsTable.sourceId,
             category: medicalDocumentsTable.category,
+            author: medicalDocumentsTable.author,
+            url: medicalDocumentsTable.url,
+            metadata: medicalDocumentsTable.metadata,
           })
           .from(medicalDocumentsTable)
-          .where(eq(medicalDocumentsTable.isArchived, false))
-          .then((all) => all.filter((d) => documentIds.includes(d.id)))
+          .where(inArray(medicalDocumentsTable.id, documentIds))
       : [];
 
     const docMap = new Map(docs.map((d) => [d.id, d]));
@@ -62,6 +64,9 @@ export class CitationEngine {
         ? ` [chunk ${Math.round(chunkPosition * totalChunks) + 1}/${totalChunks}]`
         : "";
 
+      // Extract journal and pmcid from metadata JSONB
+      const docMeta = (doc.metadata ?? {}) as Record<string, unknown>;
+
       citations.push({
         chunkId: result.chunkId,
         documentId: result.documentId,
@@ -73,6 +78,10 @@ export class CitationEngine {
         confidence,
         relevanceScore: result.reRankScore,
         section: result.section ?? (result.heading ?? undefined),
+        author: doc.author ?? undefined,
+        journal: (docMeta.journal as string) ?? undefined,
+        pmcid: (docMeta.pmcid as string) ?? undefined,
+        sourceUrl: doc.url ?? (docMeta.sourceUrl as string) ?? undefined,
       });
     }
 

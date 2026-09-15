@@ -308,6 +308,10 @@ export class RagEngine {
         evidenceBlock += `- [${citation.confidence.toUpperCase()}] `;
         if (citation.guidelineName) evidenceBlock += `${citation.guidelineName} (${dateStr}): `;
         evidenceBlock += `${citation.evidenceText.slice(0, 300)}...\n`;
+        if (citation.author) evidenceBlock += `  Authors: ${citation.author}\n`;
+        if (citation.journal) evidenceBlock += `  Journal: ${citation.journal}\n`;
+        if (citation.pmcid) evidenceBlock += `  PMCID: ${citation.pmcid}\n`;
+        if (citation.sourceUrl) evidenceBlock += `  URL: ${citation.sourceUrl}\n`;
       }
       evidenceBlock += "\n";
     }

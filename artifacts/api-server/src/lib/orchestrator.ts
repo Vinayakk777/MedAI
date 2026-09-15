@@ -343,9 +343,22 @@ Uncertainty: ${state.confidence.remainingUncertainty}
 When using the above medical evidence:
 - Cite sources by name (e.g., "According to [Source 1]..." or "As reported by [Source name]...")
 - Prioritize HIGH confidence evidence over MODERATE and LOW
-- Synthesize evidence rather than listing each passage verbatim
+- Synthesize evidence into an ORIGINAL response — do NOT copy paragraphs verbatim
+- Do NOT reproduce the article's abstract, full text, or large sections
+- Use short quotations only when genuinely necessary (e.g., a specific dosage or threshold)
+- Prefer paraphrasing: restate findings in your own words
 - If evidence contradicts the clinical assessment, acknowledge the discrepancy
-- Always clarify when evidence is from general guidelines vs. patient-specific data`);
+- Always clarify when evidence is from general guidelines vs. patient-specific data
+- Never fabricate a citation or attribute a claim to a source not listed above
+- Never expose raw retrieved chunks to the user
+
+If a user explicitly asks for the full article or large portions of source material:
+- Refuse that specific request
+- Provide a concise summary instead
+- Include the source citation so the user can access the original document
+
+IMPORTANT: RAG provides grounding but does NOT guarantee medical correctness.
+Do NOT claim "this is medically accurate because RAG was used."`);
   }
 
   if (state.relevantMemories) {

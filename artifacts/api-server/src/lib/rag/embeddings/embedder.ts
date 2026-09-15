@@ -5,7 +5,7 @@ import { createHash } from "crypto";
 // ─── Hugging Face Free Embedding Provider ───
 
 export class HuggingFaceEmbedder implements EmbeddingProvider {
-  readonly model = "sentence-transformers/all-MiniLM-L6-v2";
+  readonly model: string;
   readonly dimensions = 384;
   private apiUrl: string;
 

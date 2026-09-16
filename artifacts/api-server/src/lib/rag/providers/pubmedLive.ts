@@ -45,7 +45,7 @@ async function articleExists(pmcid: string): Promise<boolean> {
 // ─── Search PubMed Central ───
 
 async function searchPMC(query: string, limit: number): Promise<string[]> {
-  const url = `${NCBI_BASE}/esearch.fcgi?db=pmc&term=${encodeURIComponent(query + " free full text[filter]")}&retmax=${limit}&retmode=json`;
+  const url = `${NCBI_BASE}/esearch.fcgi?db=pmc&term=${encodeURIComponent(query + " AND open access[filter]")}&retmax=${limit}&retmode=json`;
   const res = await fetch(url);
   if (!res.ok) return [];
   const data = await res.json() as any;

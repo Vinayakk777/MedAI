@@ -37,7 +37,7 @@ interface Article {
 async function searchPMC(query: string, limit: number): Promise<string[]> {
   console.log(`\nSearching: "${query}"`);
 
-  const url = `${NCBI_BASE}/esearch.fcgi?db=pmc&term=${encodeURIComponent(query + " free full text[filter]")}&retmax=${limit}&retmode=json`;
+  const url = `${NCBI_BASE}/esearch.fcgi?db=pmc&term=${encodeURIComponent(query + " AND open access[filter]")}&retmax=${limit}&retmode=json`;
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`PMC search failed: ${res.status}`);

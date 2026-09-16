@@ -138,7 +138,7 @@ async function ingestArticle(article: PubMedArticle): Promise<boolean> {
       sourceUrl: article.sourceUrl,
       ingestedVia: "live-search",
     },
-    chunkerName: "recursive",
+    chunkerName: "recursive_character",
   });
 
   return result.success;

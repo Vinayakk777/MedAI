@@ -131,7 +131,7 @@ async function ingest(article: Article): Promise<boolean> {
       authors: article.authors,
       sourceUrl: article.sourceUrl,
     },
-    chunkerName: "recursive",
+    chunkerName: "recursive_character",
   };
 
   try {

@@ -340,6 +340,8 @@ Uncertainty: ${state.confidence.remainingUncertainty}
   if (state.ragEvidence) {
     sections.push(`${state.ragEvidence}
 
+The above evidence was retrieved from the medical knowledge base. The system dynamically searches PubMed Central for relevant open-access articles when you ask a question, then uses those articles to inform the response.
+
 When using the above medical evidence:
 - Cite sources by name (e.g., "According to [Source 1]..." or "As reported by [Source name]...")
 - Prioritize HIGH confidence evidence over MODERATE and LOW

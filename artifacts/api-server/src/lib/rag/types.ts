@@ -208,6 +208,8 @@ export interface RagResponse {
   wasFallback: boolean;
   /** Pipeline performance metrics for observability */
   metrics?: PipelineMetrics;
+  /** Live PubMed search results */
+  liveIngest?: { articlesFound: number; articlesIngested: number; articlesSkipped?: number };
 }
 
 // ─── Ingestion ───

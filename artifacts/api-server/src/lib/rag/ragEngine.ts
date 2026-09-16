@@ -12,6 +12,7 @@ import { PgVectorStore } from "./vector-store/pgVectorStore";
 import { EmbeddingProvider, VectorStore } from "./types";
 import { ragCache } from "./cache";
 import { createEmbedder } from "./embeddings/embedder";
+import { liveSearchAndIngest } from "./providers/pubmedLive";
 
 /**
  * RAG Engine — Improved Pipeline Architecture
@@ -130,6 +131,16 @@ export class RagEngine {
       usedLLMRerank: false,
     };
 
+    // ── Stage 0: Live PubMed Search (on-demand ingestion) ──
+    // Search PubMed for relevant open-access articles and ingest them.
+    // This grows the knowledge base organically with user queries.
+    // Runs in parallel with retrieval prep; errors are non-fatal.
+    let liveIngestResult: { articlesFound: number; articlesIngested: number } | null = null;
+    const liveIngestPromise = liveSearchAndIngest(normalizedQuery).catch((err) => {
+      console.error("[rag] live PubMed search failed:", err);
+      return null;
+    });
+
     // ── Stage 1: Query Rewriting ──
     // Expand user query with medical synonyms to improve retrieval recall.
     // Skip for very short queries where rewriting adds noise.
@@ -150,6 +161,13 @@ export class RagEngine {
     }
 
     // ── Stage 2: Hybrid Retrieval ──
+    // Wait for live PubMed ingest to complete before searching,
+    // so newly ingested articles are available for retrieval.
+    liveIngestResult = await liveIngestPromise;
+    if (liveIngestResult && liveIngestResult.articlesIngested > 0) {
+      console.log(`[rag] live PubMed: ingested ${liveIngestResult.articlesIngested} new articles for this query`);
+    }
+
     // Retrieve from both semantic (vector) and keyword (tsvector) indices.
     // Over-retrieve by 2x to give reranker more candidates.
     const retrievalStart = Date.now();
@@ -236,6 +254,7 @@ export class RagEngine {
       latencyMs: 0,
       wasFallback: false,
       metrics,
+      liveIngest: liveIngestResult ?? undefined,
     };
   }
 
@@ -320,6 +339,11 @@ export class RagEngine {
     if (response.metrics) {
       const m = response.metrics;
       evidenceBlock += `[Pipeline: rewrite=${m.queryRewriteMs}ms, retrieval=${m.retrievalMs}ms, rerank=${m.rerankMs}ms, context=${m.contextSelectionMs}ms, chunks=${m.totalChunksRetrieved}→${m.chunksAfterDedup}]\n`;
+    }
+
+    // Include live PubMed ingest info
+    if (response.liveIngest) {
+      evidenceBlock += `[Live PubMed: found=${response.liveIngest.articlesFound} ingested=${response.liveIngest.articlesIngested}]\n`;
     }
 
     evidenceBlock += "[/MEDICAL EVIDENCE]\n";

@@ -2,6 +2,49 @@ import OpenAI from "openai";
 import { EmbeddingProvider } from "../types";
 import { createHash } from "crypto";
 
+// ─── Google AI Free Embedding Provider ───
+
+export class GoogleAIEmbedder implements EmbeddingProvider {
+  readonly model: string;
+  readonly dimensions = 768;
+  private apiKey: string;
+
+  constructor(params?: { apiKey?: string }) {
+    this.model = "text-embedding-004";
+    this.dimensions = 768;
+    this.apiKey = params?.apiKey ?? process.env.GOOGLE_AI_API_KEY ?? "";
+  }
+
+  async generateEmbedding(text: string): Promise<number[]> {
+    const cleaned = text.replace(/\s+/g, " ").trim();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:embedContent?key=${this.apiKey}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: `models/${this.model}`,
+        content: { parts: [{ text: cleaned }] },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Google AI embedding failed: ${response.status} ${await response.text()}`);
+    }
+    const data = await response.json() as any;
+    return data?.embedding?.values ?? [];
+  }
+
+  async generateEmbeddings(batch: string[]): Promise<number[][]> {
+    const results: number[][] = [];
+    for (let i = 0; i < batch.length; i += 5) {
+      const chunk = batch.slice(i, i + 5);
+      const embeddings = await Promise.all(chunk.map((t) => this.generateEmbedding(t)));
+      results.push(...embeddings);
+      if (i + 5 < batch.length) await new Promise((r) => setTimeout(r, 200));
+    }
+    return results;
+  }
+}
+
 // ─── Hugging Face Free Embedding Provider ───
 
 export class HuggingFaceEmbedder implements EmbeddingProvider {
@@ -171,13 +214,20 @@ export function getEmbedder(name: string): EmbeddingProvider | undefined {
 }
 
 export function createEmbedder(): EmbeddingProvider {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (apiKey) {
-    const inner = new OpenAIEmbedder({ apiKey });
+  // Priority 1: OpenAI (if key provided)
+  if (process.env.OPENAI_API_KEY) {
+    console.log("[embedder] Using OpenAI embeddings (1536-dim)");
+    const inner = new OpenAIEmbedder({ apiKey: process.env.OPENAI_API_KEY });
     return new CachedEmbedder(inner);
   }
-  // Free fallback: Hugging Face Inference API (no API key needed)
-  console.log("[embedder] No OPENAI_API_KEY found, using free HuggingFace embeddings (384-dim)");
-  const inner = new HuggingFaceEmbedder();
-  return new CachedEmbedder(inner);
+  // Priority 2: Google AI (free, no credit card needed)
+  if (process.env.GOOGLE_AI_API_KEY) {
+    console.log("[embedder] Using Google AI embeddings (768-dim)");
+    const inner = new GoogleAIEmbedder({ apiKey: process.env.GOOGLE_AI_API_KEY });
+    return new CachedEmbedder(inner);
+  }
+  // Fallback: throw error
+  throw new Error(
+    "No embedding provider configured. Set GOOGLE_AI_API_KEY (free) or OPENAI_API_KEY."
+  );
 }

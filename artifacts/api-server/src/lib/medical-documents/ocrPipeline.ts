@@ -1,6 +1,9 @@
 import { db, docOcrResultsTable, docUploadsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import path from "node:path";
 import type { OcrResult, OcrField } from "./types";
+import { extractPdfPages, ocrImage } from "../pdf/extractPdf";
+import { resolveStoredPath } from "../storage/paths";
 
 const COMMON_PATTERNS = {
   patientName: /(?:patient\s*(?:name|id|detail)|name\s*:)\s*([A-Za-z\s]+)/i,
@@ -65,28 +68,32 @@ export class OcrPipeline {
 
   private async extractText(filePath: string): Promise<string> {
     const fs = await import("fs/promises");
-    const ext = filePath.split(".").pop()?.toLowerCase();
+    // Stored paths are relative to `uploads/`; resolve them consistently and
+    // reject anything that escapes the upload root.
+    const resolved = resolveStoredPath(filePath) ?? filePath;
+    const ext = path.extname(resolved).slice(1).toLowerCase();
 
     if (ext === "txt" || ext === "csv") {
-      return await fs.readFile(filePath, "utf-8");
+      return await fs.readFile(resolved, "utf-8");
     }
 
     if (ext === "pdf") {
-      try {
-        const pdfParse: any = (await import("pdf-parse" as any)).default;
-        const buffer = await fs.readFile(filePath);
-        const data = await pdfParse(buffer);
-        return data.text || "";
-      } catch {
-        return "[OCR: PDF text extraction unavailable]";
+      const buffer = await fs.readFile(resolved);
+      const result = await extractPdfPages(buffer);
+      if (result.status === "failed") {
+        return "[OCR: PDF text could not be extracted]";
       }
+      return result.pages
+        .filter((page) => page.text.length > 0)
+        .map((page) => `[Page ${page.pageNumber}]\n${page.text}`)
+        .join("\n\n");
     }
 
-    if (["jpg", "jpeg", "png", "webp", "tiff", "bmp"].includes(ext || "")) {
+    if (["jpg", "jpeg", "png", "webp", "tiff", "bmp"].includes(ext)) {
       try {
-        const Tesseract: any = await import("tesseract.js" as any);
-        const { data } = await Tesseract.recognize(filePath, "eng");
-        return data.text || "";
+        const buffer = await fs.readFile(resolved);
+        const text = await ocrImage(buffer);
+        return text || "[OCR: Image text extraction unavailable]";
       } catch {
         return "[OCR: Image text extraction unavailable]";
       }

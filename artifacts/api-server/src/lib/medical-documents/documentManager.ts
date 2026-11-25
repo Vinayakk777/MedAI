@@ -6,6 +6,7 @@ import { PrescriptionParser } from "./prescriptionParser";
 import { ImageAnalyzer } from "./imageAnalyzer";
 import { TrendComparator } from "./trendComparator";
 import { ClinicalSummarizer } from "./clinicalSummarizer";
+import { toStoredPath, safeUserSegment, safeExtension, sanitizeFileName } from "../storage/paths";
 import type { UploadRequest, UploadResult, DocumentSearchParams, DocumentSearchResult, DocumentType } from "./types";
 
 export class DocumentManager {
@@ -28,7 +29,12 @@ export class DocumentManager {
   async upload(
     userId: string, file: { originalname: string; size: number; mimetype: string; filename?: string; path?: string; buffer?: Buffer; }, request: UploadRequest
   ): Promise<UploadResult> {
-    const storagePath = `uploads/${userId}/${Date.now()}_${file.originalname}`;
+    // The path recorded in the database must be the path the file was actually
+    // written to. Deriving it from `file.path` (rather than rebuilding it from
+    // the user id and timestamp) keeps storage and metadata in sync.
+    const storagePath = file.path
+      ? toStoredPath(file.path)
+      : `user-documents/${safeUserSegment(userId)}/${Date.now()}_${sanitizeFileName(file.originalname, `document${safeExtension(file.originalname)}`)}`;
 
     const [saved] = await db.insert(docUploadsTable).values({
       userId,

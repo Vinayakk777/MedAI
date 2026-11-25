@@ -34,6 +34,44 @@ interface ModelConfig {
   jsonModel: string;
 }
 
+export type StructuredGenerationMode = "json_schema" | "json_object";
+
+export interface StructuredGenerationParams {
+  systemPrompt: string;
+  messages: Array<{ role: "user" | "assistant"; content: any }>;
+  model: string;
+  schemaName: string;
+  jsonSchema: Record<string, unknown>;
+  /**
+   * `json_schema` asks the provider for constrained decoding (supported by the
+   * configured GPT-OSS text models). `json_object` is the portable fallback for
+   * models or endpoints without schema support; the caller still validates.
+   */
+  mode?: StructuredGenerationMode;
+  temperature?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+export type StructuredGenerationErrorCode =
+  | "provider_error"
+  | "provider_timeout"
+  | "invalid_json"
+  | "empty_content";
+
+export interface StructuredGenerationResult {
+  data: unknown | null;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  /** Coarse failure code only. Provider messages are never propagated. */
+  error?: StructuredGenerationErrorCode;
+}
+
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 
 function getClient(): OpenAI {
@@ -151,9 +189,129 @@ async function streamChat(params: StreamChatParams): Promise<void> {
   params.callbacks.onDone(fullText, finalUsage);
 }
 
+function toUsage(
+  usage:
+    | { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+    | undefined,
+): TokenUsage | undefined {
+  if (!usage) return undefined;
+  return {
+    promptTokens: usage.prompt_tokens ?? 0,
+    completionTokens: usage.completion_tokens ?? 0,
+    totalTokens: usage.total_tokens ?? 0,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (!isRecord(err)) return false;
+  const name = typeof err.name === "string" ? err.name : "";
+  const message = typeof err.message === "string" ? err.message : "";
+  return /abort/i.test(name) || /abort|timeout|timed out/i.test(message);
+}
+
+function isUnsupportedResponseFormat(err: unknown): boolean {
+  if (!isRecord(err)) return false;
+  const status = typeof err.status === "number" ? err.status : undefined;
+  if (status !== 400 && status !== 422) return false;
+  const message = typeof err.message === "string" ? err.message : "";
+  return /response_format|json_schema|json schema|structured/i.test(message);
+}
+
+interface CompletionLike {
+  choices: Array<{ message?: { content?: string | null } | null }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+}
+
+/**
+ * Non-streaming generation with a JSON response contract.
+ *
+ * Groq does not support streaming together with structured outputs, so this
+ * call is buffered. The chat route already buffered model output before
+ * delivery, so the SSE contract is unchanged. Failures are reduced to a coarse
+ * code; raw provider errors never leave this function.
+ */
+async function generateStructured(
+  params: StructuredGenerationParams,
+): Promise<StructuredGenerationResult> {
+  const requestedMode: StructuredGenerationMode = params.mode ?? "json_schema";
+  if (params.signal?.aborted) {
+    return { data: null, error: "provider_timeout" };
+  }
+  const messages = [
+    { role: "system" as const, content: params.systemPrompt },
+    ...params.messages,
+  ];
+
+  const call = async (mode: StructuredGenerationMode): Promise<CompletionLike> => {
+    const client = getClient();
+    return client.chat.completions.create(
+      {
+        model: params.model,
+        messages,
+        response_format:
+          mode === "json_schema"
+            ? {
+                type: "json_schema" as const,
+                json_schema: {
+                  name: params.schemaName,
+                  strict: true,
+                  schema: params.jsonSchema,
+                },
+              }
+            : { type: "json_object" as const },
+        temperature: params.temperature ?? 0.3,
+        max_tokens: params.maxTokens ?? 8192,
+      },
+      { signal: params.signal },
+    );
+  };
+
+  let completion: CompletionLike;
+  try {
+    try {
+      completion = await call(requestedMode);
+    } catch (err) {
+      // A provider without constrained-decoding support rejects the request.
+      // Retry once in portable JSON-object mode; the caller still validates.
+      if (requestedMode === "json_schema" && isUnsupportedResponseFormat(err)) {
+        completion = await call("json_object");
+      } else {
+        throw err;
+      }
+    }
+  } catch (err) {
+    return {
+      data: null,
+      error: isAbortError(err, params.signal) ? "provider_timeout" : "provider_error",
+    };
+  }
+
+  if (!completion || !Array.isArray(completion.choices)) {
+    return { data: null, error: "provider_error" };
+  }
+
+  const raw = completion.choices[0]?.message?.content;
+  const usage = toUsage(completion.usage);
+  if (!raw || raw.trim().length === 0) {
+    return { data: null, usage, error: "empty_content" };
+  }
+
+  try {
+    return { data: JSON.parse(raw), usage };
+  } catch {
+    return { data: null, usage, error: "invalid_json" };
+  }
+}
+
 export const llm = {
   primary: process.env.GROQ_API_KEY ? { name: "groq" } : process.env.OPENAI_API_KEY ? { name: "openai" } : null,
   generateJSON,
   generateText,
+  generateStructured,
   streamChat,
 };

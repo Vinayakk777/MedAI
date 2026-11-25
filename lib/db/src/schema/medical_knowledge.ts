@@ -5,6 +5,14 @@ import { z } from "zod/v4";
 
 // ─── Knowledge Sources Registry ───
 
+/**
+ * The pgvector dimension is part of the storage contract. Ingestion must
+ * validate the configured embedding provider against this value before it
+ * writes chunks; a provider with a different dimension cannot be stored here
+ * without a migration that rewrites the column and re-indexes every chunk.
+ */
+export const EMBEDDING_DIMENSIONS = 1536;
+
 export const knowledgeSourcesTable = pgTable("knowledge_sources", {
   id: uuid("id").primaryKey().defaultRandom(),
   slug: text("slug").notNull().unique(),
@@ -62,7 +70,7 @@ export const documentChunksTable = pgTable("document_chunks", {
   heading: text("heading"),
   wordCount: integer("word_count").default(0),
   pageNumber: integer("page_number"),
-  embedding: vector("embedding", { dimensions: 1536 }),
+  embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
   metadata: jsonb("metadata").default({}),
   tags: jsonb("tags").$type<string[]>().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -74,7 +82,7 @@ export const retrievalLogsTable = pgTable("retrieval_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").notNull(),
   query: text("query").notNull(),
-  queryEmbedding: vector("query_embedding", { dimensions: 1536 }),
+  queryEmbedding: vector("query_embedding", { dimensions: EMBEDDING_DIMENSIONS }),
   retrievalType: text("retrieval_type").default("semantic"), // semantic | keyword | hybrid
   matchedChunkIds: jsonb("matched_chunk_ids").$type<string[]>().default([]),
   resultCount: integer("result_count").default(0),
@@ -111,7 +119,7 @@ export const embeddingCacheTable = pgTable("embedding_cache", {
   id: uuid("id").primaryKey().defaultRandom(),
   textHash: text("text_hash").notNull().unique(),
   text: text("text").notNull(),
-  embedding: vector("embedding", { dimensions: 1536 }),
+  embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }),
   model: text("model").default("text-embedding-3-small"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

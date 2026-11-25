@@ -1,58 +1,106 @@
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { ChunkingStrategy, ChunkOptions, ChunkResult } from "../types";
+
+/**
+ * Text splitting is delegated to LangChain's `RecursiveCharacterTextSplitter`.
+ *
+ * MedAI keeps the `ChunkingStrategy` contract, the chunker registry and the
+ * heading-aware section scanning, because chunk provenance (`heading`,
+ * `section`, sequential index, word count) is part of the ingestion schema and
+ * the citation contract. LangChain provides the actual recursive splitting,
+ * overlap handling and separator strategy.
+ */
+
+const DEFAULT_SEPARATORS = ["\n\n", "\n", ". ", " ", ""];
+
+function splitterOptions(maxChunkSize: number, chunkOverlap: number) {
+  const chunkSize = Math.max(1, Math.floor(maxChunkSize));
+  return {
+    chunkSize,
+    chunkOverlap: Math.min(
+      Math.max(0, Math.floor(chunkOverlap)),
+      Math.max(0, chunkSize - 1),
+    ),
+    keepSeparator: true,
+  };
+}
+
+function countWords(content: string): number {
+  return content.split(/\s+/).filter(Boolean).length;
+}
 
 // ─── Recursive Character Text Splitter ───
 
 export class RecursiveCharacterChunker implements ChunkingStrategy {
   readonly name = "recursive_character";
-  private readonly separators = ["\n\n", "\n", ". ", " ", ""];
 
-  chunk(text: string, options?: ChunkOptions): ChunkResult[] {
+  async chunk(text: string, options?: ChunkOptions): Promise<ChunkResult[]> {
     const maxSize = options?.maxChunkSize ?? 1000;
     const overlap = options?.chunkOverlap ?? 100;
-    return this.splitText(text, maxSize, overlap);
-  }
+    const splitter = new RecursiveCharacterTextSplitter({
+      ...splitterOptions(maxSize, overlap),
+      separators: DEFAULT_SEPARATORS,
+    });
 
-  private splitText(text: string, maxSize: number, overlap: number): ChunkResult[] {
     const chunks: ChunkResult[] = [];
-    const sections = this.splitByHeadings(text);
+    let pending = "";
+    let pendingHeading: string | undefined;
 
-    let currentChunk = "";
-    let index = 0;
+    const flush = () => {
+      if (pending.trim()) {
+        chunks.push(this.createChunk(pending, chunks.length, pendingHeading));
+      }
+      pending = "";
+      pendingHeading = undefined;
+    };
 
-    for (const section of sections) {
-      if (currentChunk.length + section.content.length <= maxSize) {
-        currentChunk += (currentChunk ? "\n" : "") + section.content;
-      } else {
-        if (currentChunk) {
-          chunks.push(this.createChunk(currentChunk, index++, section.heading));
-        }
-        currentChunk = section.content.length > maxSize
-          ? this.forceSplit(section.content, maxSize, overlap, index, section.heading, chunks).joined
-          : section.content;
-        if (currentChunk.length > maxSize) {
-          currentChunk = this.forceSplit(currentChunk, maxSize, overlap, index, section.heading, chunks).joined;
-          index = this.forceSplit(currentChunk, maxSize, overlap, index, section.heading, chunks).nextIndex;
-        }
+    for (const section of this.splitByHeadings(text)) {
+      const content = section.content.trim();
+      if (!content) continue;
+
+      // Merge consecutive short sections so headings stay attached to their
+      // text, matching the previous chunker's behavior.
+      if (pending && pending.length + content.length + 1 <= maxSize) {
+        pending += `\n${content}`;
+        continue;
+      }
+
+      flush();
+
+      if (content.length <= maxSize) {
+        pending = content;
+        pendingHeading = section.heading;
+        continue;
+      }
+
+      const pieces = await splitter.splitText(content);
+      for (const piece of pieces) {
+        if (!piece.trim()) continue;
+        chunks.push(this.createChunk(piece, chunks.length, section.heading));
       }
     }
 
-    if (currentChunk) {
-      chunks.push(this.createChunk(currentChunk, index++));
-    }
-
+    flush();
     return chunks;
   }
 
-  private createChunk(content: string, index: number, heading?: string): ChunkResult {
+  private createChunk(
+    content: string,
+    index: number,
+    heading?: string,
+  ): ChunkResult {
+    const trimmed = content.trim();
     return {
-      content: content.trim(),
+      content: trimmed,
       index,
       heading,
-      wordCount: content.split(/\s+/).filter(Boolean).length,
+      wordCount: countWords(trimmed),
     };
   }
 
-  private splitByHeadings(text: string): Array<{ content: string; heading?: string }> {
+  private splitByHeadings(
+    text: string,
+  ): Array<{ content: string; heading?: string }> {
     const headingRegex = /^(#{1,6}\s+.+)$/gm;
     const sections: Array<{ content: string; heading?: string }> = [];
     let lastIndex = 0;
@@ -61,7 +109,10 @@ export class RecursiveCharacterChunker implements ChunkingStrategy {
 
     while ((match = headingRegex.exec(text)) !== null) {
       if (match.index > lastIndex) {
-        sections.push({ content: text.slice(lastIndex, match.index).trim(), heading: currentHeading });
+        sections.push({
+          content: text.slice(lastIndex, match.index).trim(),
+          heading: currentHeading,
+        });
       }
       currentHeading = match[1].replace(/^#+\s+/, "");
       lastIndex = match.index;
@@ -73,32 +124,24 @@ export class RecursiveCharacterChunker implements ChunkingStrategy {
 
     return sections.length > 0 ? sections : [{ content: text }];
   }
-
-  private forceSplit(
-    text: string, maxSize: number, overlap: number,
-    startIndex: number, heading: string | undefined,
-    chunks: ChunkResult[],
-  ): { joined: string; nextIndex: number } {
-    let index = startIndex;
-    const words = text.split(/\s+/);
-    let i = 0;
-
-    while (i < words.length) {
-      const chunk = words.slice(i, i + maxSize).join(" ");
-      chunks.push(this.createChunk(chunk, index++, heading));
-      i += maxSize - overlap;
-    }
-
-    return { joined: "", nextIndex: index };
-  }
 }
 
 // ─── Sentence-Based Chunker ───
 
+/**
+ * Sentence-aware chunking stays custom on purpose.
+ *
+ * LangChain's text splitters split on literal separators and, with
+ * `keepSeparator`, attach the separator to the *start* of the next piece
+ * (`"First sentence"`, `". Second sentence"`). That would strip the terminal
+ * punctuation from every chunk. MedAI keeps sentence segmentation so chunks end
+ * on a complete sentence, which the ingestion contract and citation snippets
+ * rely on.
+ */
 export class SentenceChunker implements ChunkingStrategy {
   readonly name = "sentence";
 
-  chunk(text: string, options?: ChunkOptions): ChunkResult[] {
+  async chunk(text: string, options?: ChunkOptions): Promise<ChunkResult[]> {
     const maxSize = options?.maxChunkSize ?? 1000;
     const overlap = options?.chunkOverlap ?? 50;
     const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
@@ -126,10 +169,11 @@ export class SentenceChunker implements ChunkingStrategy {
   }
 
   private buildChunk(content: string, index: number): ChunkResult {
+    const trimmed = content.trim();
     return {
-      content: content.trim(),
+      content: trimmed,
       index,
-      wordCount: content.split(/\s+/).filter(Boolean).length,
+      wordCount: countWords(trimmed),
     };
   }
 }
@@ -139,7 +183,7 @@ export class SentenceChunker implements ChunkingStrategy {
 export class SectionChunker implements ChunkingStrategy {
   readonly name = "section";
 
-  chunk(text: string, options?: ChunkOptions): ChunkResult[] {
+  async chunk(text: string, options?: ChunkOptions): Promise<ChunkResult[]> {
     const headings = options?.sectionHeadings ?? [
       "Introduction", "Background", "Scope", "Recommendations",
       "Guidelines", "Clinical Practice", "Diagnosis", "Treatment",
@@ -164,7 +208,7 @@ export class SectionChunker implements ChunkingStrategy {
             content: sectionContent,
             index: index++,
             section: currentSection,
-            wordCount: sectionContent.split(/\s+/).filter(Boolean).length,
+            wordCount: countWords(sectionContent),
           });
         }
         currentSection = match ? match[1].toLowerCase() : currentSection;

@@ -1,27 +1,69 @@
 export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 export const ACCEPTED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"] as const;
-export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+export const ACCEPTED_PDF_TYPES = ["application/pdf"] as const;
+export const ACCEPTED_PDF_EXTENSIONS = [".pdf"] as const;
+export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB (matches the server)
+export const MAX_IMAGE_SIZE_BYTES = MAX_ATTACHMENT_SIZE_BYTES;
 export const MAX_ATTACHMENTS = 6;
 
+export type AttachmentKind = "image" | "pdf";
+
 export type ValidationResult =
-  | { ok: true }
+  | { ok: true; kind: AttachmentKind }
   | { ok: false; reason: string };
 
-export function validateImage(file: File): ValidationResult {
-  const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-  if (!ACCEPTED_IMAGE_TYPES.includes(file.type as (typeof ACCEPTED_IMAGE_TYPES)[number])) {
-    return { ok: false, reason: "Unsupported file type. Please upload a JPG, PNG, or WebP image." };
+function extensionOf(name: string): string {
+  const idx = name.lastIndexOf(".");
+  return idx >= 0 ? name.slice(idx).toLowerCase() : "";
+}
+
+/**
+ * Classifies a candidate attachment. The declared MIME type and the extension
+ * must agree; the server independently re-checks the file signature.
+ */
+export function detectAttachmentKind(file: File): AttachmentKind | null {
+  const ext = extensionOf(file.name);
+  const declared = (file.type || "").toLowerCase();
+
+  if (
+    ACCEPTED_PDF_EXTENSIONS.includes(ext as (typeof ACCEPTED_PDF_EXTENSIONS)[number]) &&
+    (declared === "application/pdf" || declared === "" || declared === "application/octet-stream")
+  ) {
+    return "pdf";
   }
-  if (!ACCEPTED_IMAGE_EXTENSIONS.includes(ext as (typeof ACCEPTED_IMAGE_EXTENSIONS)[number])) {
-    return { ok: false, reason: "Unsupported file extension. Please upload a .jpg, .jpeg, .png or .webp image." };
+
+  if (
+    ACCEPTED_IMAGE_TYPES.includes(declared as (typeof ACCEPTED_IMAGE_TYPES)[number]) &&
+    ACCEPTED_IMAGE_EXTENSIONS.includes(ext as (typeof ACCEPTED_IMAGE_EXTENSIONS)[number])
+  ) {
+    return "image";
+  }
+
+  return null;
+}
+
+export function validateAttachment(file: File): ValidationResult {
+  const kind = detectAttachmentKind(file);
+  if (!kind) {
+    return {
+      ok: false,
+      reason: "Unsupported file type. Please upload a PDF, JPG, PNG, or WebP file.",
+    };
   }
   if (file.size === 0) {
-    return { ok: false, reason: "This image file is empty." };
+    return { ok: false, reason: "This file is empty." };
   }
-  if (file.size > MAX_IMAGE_SIZE_BYTES) {
-    return { ok: false, reason: "Image is too large (max 15 MB). Please choose a smaller image." };
+  if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+    return { ok: false, reason: "This file is too large (max 25 MB). Please choose a smaller file." };
   }
-  return { ok: true };
+  return { ok: true, kind };
+}
+
+export function validateImage(file: File): ValidationResult {
+  if (detectAttachmentKind(file) !== "image") {
+    return { ok: false, reason: "Unsupported file type. Please upload a JPG, PNG, or WebP image." };
+  }
+  return validateAttachment(file);
 }
 
 export type CompressedImage = {
@@ -132,6 +174,36 @@ export async function prepareImage(file: File): Promise<CompressedImage> {
   };
 }
 
+export type PreparedAttachment = {
+  blob: Blob;
+  mimeType: string;
+  name: string;
+  kind: AttachmentKind;
+  width?: number;
+  height?: number;
+};
+
+/**
+ * Validates a chat attachment and prepares it for upload. Images are
+ * compressed; PDFs are sent unchanged so the server can extract their text.
+ */
+export async function prepareAttachment(file: File): Promise<PreparedAttachment> {
+  const validation = validateAttachment(file);
+  if (!validation.ok) throw new Error(validation.reason);
+
+  if (validation.kind === "pdf") {
+    return {
+      blob: file,
+      mimeType: "application/pdf",
+      name: file.name,
+      kind: "pdf",
+    };
+  }
+
+  const prepared = await prepareImage(file);
+  return { ...prepared, kind: "image" };
+}
+
 export type UploadProgress = (percent: number) => void;
 
 export type UploadedAttachment = {
@@ -140,18 +212,22 @@ export type UploadedAttachment = {
   mimeType: string;
   name: string;
   size: number;
+  type?: "image" | "document";
+  kind?: "image" | "pdf";
+  pageCount?: number;
+  extractionStatus?: string;
 };
 
-/** Uploads images to the authenticated backend endpoint with progress. */
-export function uploadImages(
-  images: { blob: Blob; name: string; mimeType: string }[],
+/** Uploads images/PDFs to the authenticated backend endpoint with progress. */
+export function uploadAttachments(
+  attachments: { blob: Blob; name: string; mimeType: string }[],
   onProgress?: UploadProgress,
   signal?: AbortSignal,
 ): Promise<UploadedAttachment[]> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
-    for (const img of images) {
-      form.append("images", img.blob, img.name);
+    for (const attachment of attachments) {
+      form.append("images", attachment.blob, attachment.name);
     }
 
     const xhr = new XMLHttpRequest();
@@ -189,11 +265,14 @@ export function uploadImages(
         onProgress?.(100);
         resolve(json.attachments as UploadedAttachment[]);
       } else {
-        reject(new Error(json?.error ?? "Image upload failed. Please try again."));
+        reject(new Error(json?.error ?? "Attachment upload failed. Please try again."));
       }
     };
-    xhr.onerror = () => reject(new Error("Network error while uploading the image."));
-    xhr.ontimeout = () => reject(new Error("Image upload timed out."));
+    xhr.onerror = () => reject(new Error("Network error while uploading the attachment."));
+    xhr.ontimeout = () => reject(new Error("Attachment upload timed out."));
     xhr.send(form);
   });
 }
+
+/** @deprecated Use `uploadAttachments`; kept for existing imports. */
+export const uploadImages = uploadAttachments;

@@ -17,8 +17,8 @@ import { useTheme } from "@/hooks/use-theme";
 import { useToast } from "@/hooks/use-toast";
 import { stopAllSpeech } from "@/hooks/use-speech-synthesis";
 import {
-  prepareImage,
-  uploadImages,
+  prepareAttachment,
+  uploadAttachments,
   MAX_ATTACHMENTS,
   type UploadedAttachment,
 } from "@/lib/image";
@@ -253,21 +253,23 @@ export default function ChatPage() {
       const added: PendingAttachment[] = [];
       for (const file of files) {
         try {
-          const prepared = await prepareImage(file);
+          const prepared = await prepareAttachment(file);
           const localId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const previewUrl = URL.createObjectURL(prepared.blob);
+          const previewUrl =
+            prepared.kind === "image" ? URL.createObjectURL(prepared.blob) : "";
           added.push({
             localId,
             file: prepared.blob,
             name: prepared.name,
+            kind: prepared.kind,
             previewUrl,
             width: prepared.width,
             height: prepared.height,
           });
         } catch (err) {
           toast({
-            title: "Image not added",
-            description: err instanceof Error ? err.message : "Could not read this image.",
+            title: "Attachment not added",
+            description: err instanceof Error ? err.message : "Could not read this file.",
             variant: "destructive",
           });
         }
@@ -282,14 +284,16 @@ export default function ChatPage() {
   const handleRemoveAttachment = useCallback((localId: string) => {
     setPendingAttachments((prev) => {
       const target = prev.find((a) => a.localId === localId);
-      if (target) URL.revokeObjectURL(target.previewUrl);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
       return prev.filter((a) => a.localId !== localId);
     });
   }, []);
 
   useEffect(() => {
     return () => {
-      pendingAttachments.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+      pendingAttachments.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
       stopAllSpeech();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -338,8 +342,15 @@ export default function ChatPage() {
         setIsUploading(true);
         setUploadProgress(0);
         try {
-          const uploaded: UploadedAttachment[] = await uploadImages(
-            pending.map((a) => ({ blob: a.file, name: a.name, mimeType: a.file.type })),
+          const uploaded: UploadedAttachment[] = await uploadAttachments(
+            pending.map((a) => ({
+              blob: a.file,
+              name: a.name,
+              mimeType:
+                a.kind === "pdf"
+                  ? "application/pdf"
+                  : a.file.type || "image/jpeg",
+            })),
             (pct) => setUploadProgress(pct),
           );
           serverAttachments = uploaded.map((u) => ({
@@ -348,8 +359,12 @@ export default function ChatPage() {
             mimeType: u.mimeType,
             name: u.name,
             size: u.size,
+            type: u.type ?? (u.kind === "pdf" ? "document" : "image"),
+            pageCount: u.pageCount,
           }));
-          pending.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+          pending.forEach((a) => {
+            if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+          });
           setPendingAttachments([]);
         } catch (err) {
           setIsUploading(false);
@@ -357,7 +372,7 @@ export default function ChatPage() {
           sendingRef.current = false;
           toast({
             title: "Upload failed",
-            description: err instanceof Error ? err.message : "Could not upload the image.",
+            description: err instanceof Error ? err.message : "Could not upload the attachment.",
             variant: "destructive",
           });
           return;
@@ -539,7 +554,9 @@ export default function ChatPage() {
     setIsTyping(false);
     failedUserMessageIdRef.current = null;
     retryPayloadRef.current = null;
-    pendingAttachments.forEach((a) => URL.revokeObjectURL(a.previewUrl));
+    pendingAttachments.forEach((a) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    });
     setPendingAttachments([]);
     stopAllSpeech();
   }, [pendingAttachments]);

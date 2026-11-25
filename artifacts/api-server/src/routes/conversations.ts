@@ -7,7 +7,9 @@ import {
   messagesTable,
   safetyEvaluationsTable,
   chatAttachmentsTable,
+  chatAttachmentPagesTable,
   type ChatAttachment,
+  type ChatAttachmentPage,
   type MessageAttachment,
 } from "@workspace/db";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
@@ -37,6 +39,7 @@ import {
   formatMemoriesForPrompt,
 } from "../lib/memoryEngine";
 import { getRagEngine } from "../lib/rag/ragEngine";
+import { buildCitationFooter } from "../lib/rag/citationFooter";
 import {
   createInitialState,
   buildSystemPrompt,
@@ -45,12 +48,98 @@ import {
 } from "../lib/orchestrator";
 import { SafetyFramework } from "../lib/safety/framework";
 import { classifyQueryRisk, buildHighRiskPrefix, buildInsufficientInfoResponse } from "../lib/safety/queryClassifier";
+import {
+  sanitizeUntrustedEvidence,
+  wrapUntrustedEvidence,
+} from "../lib/safety/untrustedEvidence";
+import { applyResponseGate, SAFE_FALLBACK_MESSAGE } from "../lib/safety/responseGate";
+import type { CitationEvidence } from "../lib/rag/types";
 import { llm, getModelConfig } from "../lib/llm";
+import {
+  ANSWER_CONTRACT_NAME,
+  ANSWER_JSON_SCHEMA,
+  STRUCTURED_ANSWER_INSTRUCTIONS,
+  buildEvidenceRefBlock,
+  parseAnswerContract,
+  resolveAnswerContract,
+} from "../lib/structured-response/answerContract";
 import { AnalyticsCollector } from "../lib/observability/analyticsCollector";
 import { ProviderComparator } from "../lib/observability/providerComparator";
+import {
+  ATTACHMENT_EVIDENCE_INSTRUCTIONS,
+  UNREADABLE_ATTACHMENT_MESSAGE,
+  buildAttachmentEvidence,
+  buildAttachmentQuestionFallback,
+  buildUnreadableAttachmentsNotice,
+} from "../lib/chat-attachments/evidence";
+import { resolveStoredPath } from "../lib/storage/paths";
 
 const MAX_ATTACHMENTS_PER_MESSAGE = 6;
-const chatImageDir = path.join(process.cwd(), "uploads", "chat-images");
+// Attachments written before the PDF rollout used a flat directory with a bare
+// filename as the storage key.
+const LEGACY_CHAT_IMAGE_DIR = path.join(process.cwd(), "uploads", "chat-images");
+
+const SAFE_GENERATION_ERROR =
+  "The assistant could not generate a response right now. Please try again or consult a healthcare professional.";
+
+function safetyTimeoutMs(): number {
+  const raw = Number(process.env.SAFETY_EVALUATION_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 10_000;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
+ * Structured safety telemetry. Deliberately excludes user query text, model
+ * output, credentials, and authentication identifiers.
+ */
+function logSafetyOutcome(req: any, outcome: Record<string, unknown>): void {
+  const entry = { event: "safety_outcome", ...outcome };
+  const logger = req?.log;
+  if (logger?.info) {
+    logger.info(entry, "safety outcome");
+  } else {
+    console.info(JSON.stringify(entry));
+  }
+}
+
+/**
+ * Emit validated text in SSE-sized pieces. The event shape is unchanged from
+ * the original streaming contract; only the timing is different (after the
+ * safety gate rather than token-by-token).
+ */
+function splitForSse(text: string, maxLength = 180): string[] {
+  if (!text) return [];
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > maxLength) {
+    let cut = rest.lastIndexOf(" ", maxLength);
+    if (cut < maxLength / 2) cut = maxLength;
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
 
 function generateTitle(content: string): string {
   const words = content.trim().split(/\s+/).slice(0, 6).join(" ");
@@ -61,12 +150,23 @@ type VisionPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
 
+function resolveAttachmentFile(storageKey: string): string | null {
+  const direct = resolveStoredPath(storageKey);
+  if (direct && fs.existsSync(direct)) return direct;
+  if (!storageKey.includes("/") && !storageKey.includes("\\")) {
+    const legacy = path.join(LEGACY_CHAT_IMAGE_DIR, storageKey);
+    if (fs.existsSync(legacy)) return legacy;
+  }
+  return null;
+}
+
 function loadImageParts(attachments: ChatAttachment[]): VisionPart[] {
   const parts: VisionPart[] = [];
   for (const att of attachments) {
+    if (att.kind === "pdf" || !att.mimeType.startsWith("image/")) continue;
     try {
-      const filePath = path.join(chatImageDir, att.storageKey);
-      if (!fs.existsSync(filePath)) continue;
+      const filePath = resolveAttachmentFile(att.storageKey);
+      if (!filePath) continue;
       const buf = fs.readFileSync(filePath);
       if (buf.length === 0) continue;
       parts.push({
@@ -81,15 +181,17 @@ function loadImageParts(attachments: ChatAttachment[]): VisionPart[] {
 }
 
 function toMessageAttachment(att: ChatAttachment): MessageAttachment {
+  const isPdf = att.kind === "pdf" || att.mimeType === "application/pdf";
   return {
     id: att.id,
-    type: "image",
+    type: isPdf ? "document" : "image",
     url: `/api/images/${att.id}`,
     mimeType: att.mimeType,
     name: att.name,
     size: att.size ?? undefined,
     width: att.width ?? undefined,
     height: att.height ?? undefined,
+    pageCount: att.pageCount ?? undefined,
   };
 }
 
@@ -242,7 +344,10 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       return;
     }
   }
-  const hasImages = userAttachments.length > 0;
+  const hasAttachments = userAttachments.length > 0;
+  const imageAttachments = userAttachments.filter((a) => a.kind !== "pdf");
+  const pdfAttachments = userAttachments.filter((a) => a.kind === "pdf");
+  const hasImages = imageAttachments.length > 0;
 
   try {
     const [conv] = await db
@@ -261,19 +366,67 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       .where(eq(messagesTable.conversationId, id))
       .orderBy(messagesTable.createdAt);
 
+    // Page-level text for PDF attachments. The attachment ids were already
+    // verified to belong to this user above, so this cannot read another
+    // user's document. Failures degrade to "unreadable", never to an error.
+    let attachmentPages: ChatAttachmentPage[] = [];
+    if (pdfAttachments.length > 0) {
+      try {
+        attachmentPages = await db
+          .select()
+          .from(chatAttachmentPagesTable)
+          .where(
+            inArray(
+              chatAttachmentPagesTable.attachmentId,
+              pdfAttachments.map((attachment) => attachment.id),
+            ),
+          )
+          .orderBy(chatAttachmentPagesTable.pageNumber);
+      } catch (err) {
+        console.error("[conversations] failed to load attachment pages:", err);
+      }
+    }
+
+    const attachmentEvidence = buildAttachmentEvidence(
+      pdfAttachments.map((attachment) => ({
+        id: attachment.id,
+        name: attachment.name,
+        kind: attachment.kind,
+        extractionStatus: attachment.extractionStatus,
+      })),
+      attachmentPages.map((page) => ({
+        attachmentId: page.attachmentId,
+        pageNumber: page.pageNumber,
+        text: page.text,
+        extractionMethod: page.extractionMethod,
+      })),
+    );
+
+    const effectiveQuestion =
+      content ||
+      (pdfAttachments.length > 0
+        ? buildAttachmentQuestionFallback(pdfAttachments.map((attachment) => attachment.name))
+        : "");
+
     // Persist user message
     const [userMessage] = await db
       .insert(messagesTable)
       .values({
         conversationId: id,
         role: "user",
-        content: content || (hasImages ? "Sent an image" : ""),
-        attachments: hasImages ? userAttachments.map(toMessageAttachment) : [],
+        content:
+          content ||
+          (hasAttachments
+            ? imageAttachments.length > 0
+              ? "Sent an image"
+              : "Attached a document"
+            : ""),
+        attachments: hasAttachments ? userAttachments.map(toMessageAttachment) : [],
       })
       .returning();
 
     // Link attachments to this message + conversation (ownership already verified).
-    if (hasImages) {
+    if (hasAttachments) {
       await db
         .update(chatAttachmentsTable)
         .set({ messageId: userMessage.id, conversationId: id })
@@ -282,7 +435,7 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
 
     // Initialize orchestration state
     const state: ConsultationState = createInitialState(
-      content || (hasImages ? "[Image message]" : ""),
+      effectiveQuestion || (hasAttachments ? "[Image message]" : ""),
       history.map((m) => ({ role: m.role, content: m.content })),
     );
 
@@ -394,7 +547,7 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     // ── Pipeline: Step 2b — RAG medical evidence retrieval (BEFORE stream) ──
     // RAG evidence must be available when building the system prompt so the LLM
     // can synthesize retrieved medical literature into its response.
-    let ragCitations: import("../lib/rag/types").CitationEvidence[] = [];
+    let ragCitations: CitationEvidence[] = [];
     if (!isEmergency && content) {
       try {
         const ragEngine = getRagEngine();
@@ -426,43 +579,100 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
             pipelineStage: "diagnosis",
             useCache: true,
           });
-          state.ragEvidence = evidenceBlock;
+
+          // Retrieved documents are untrusted input. Neutralize instruction-like
+          // fragments before they can reach the model, and mark the boundary.
+          const sanitized = sanitizeUntrustedEvidence(evidenceBlock);
+          state.ragEvidence = wrapUntrustedEvidence(sanitized.text);
           ragCitations = citations;
-          console.log(`[conversations] RAG evidence retrieved: ${citations.length} citations (query: ${queryText.slice(0, 60)}...)`);
+
+          logSafetyOutcome(req, {
+            stage: "retrieval",
+            action: sanitized.injectionDetected ? "sanitized" : "accepted",
+            reason: sanitized.injectionDetected
+              ? "prompt_injection_in_retrieved_evidence"
+              : "evidence_retrieved",
+            redactions: sanitized.redactions,
+            citationCount: citations.length,
+          });
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error("[conversations] RAG evidence retrieval failed:", msg);
+        logSafetyOutcome(req, {
+          stage: "retrieval",
+          action: "error",
+          reason: "rag_retrieval_error",
+          errorName: err instanceof Error ? err.name : "UnknownError",
+        });
       }
     }
 
+    // Attachment evidence is request-scoped: it is never written to the shared
+    // vector store, so it cannot leak into another user's retrieval.
+    if (attachmentEvidence.evidenceBlock) {
+      const sanitizedAttachmentEvidence = sanitizeUntrustedEvidence(
+        attachmentEvidence.evidenceBlock,
+      );
+      state.ragEvidence = [
+        state.ragEvidence,
+        wrapUntrustedEvidence(sanitizedAttachmentEvidence.text),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      ragCitations = [...ragCitations, ...attachmentEvidence.citations];
+
+      logSafetyOutcome(req, {
+        stage: "attachment_retrieval",
+        action: sanitizedAttachmentEvidence.injectionDetected ? "sanitized" : "accepted",
+        reason: sanitizedAttachmentEvidence.injectionDetected
+          ? "prompt_injection_in_attachment_evidence"
+          : "attachment_evidence_loaded",
+        redactions: sanitizedAttachmentEvidence.redactions,
+        documentCount: attachmentEvidence.readableDocuments.length,
+        citationCount: attachmentEvidence.citations.length,
+      });
+    }
+
+    const unreadableAttachmentsNotice = buildUnreadableAttachmentsNotice(
+      attachmentEvidence.unreadableDocuments,
+    );
+    // No text, no images, and no question: answering from nothing would invite
+    // fabrication, so return the deterministic "unreadable" message instead.
+    const allDocumentsUnreadable =
+      pdfAttachments.length > 0 &&
+      attachmentEvidence.readableDocuments.length === 0 &&
+      imageAttachments.length === 0 &&
+      !content;
+
     // Build unified system prompt from state (symptom analysis + escalation + history).
-    // NOTE: We stream the response FIRST and run the remaining enrichment engines
-    // (assessment, validation, confidence, self-care, OTC, remedies, recovery,
-    // prevention, risk, triage, lab tests, memory, RAG) in the background AFTER the
-    // stream completes. This keeps time-to-first-token fast instead of waiting for a
-    // long chain of LLM calls that can be throttled by provider rate limits.
+    // NOTE: Generation is buffered until safety and citation validation finish.
+    // The remaining enrichment engines (assessment, validation, confidence,
+    // self-care, OTC, remedies, recovery, prevention, risk, triage, lab tests,
+    // memory, RAG persistence) still run in the background AFTER delivery so
+    // time-to-response stays reasonable.
     //
     // For high-risk medical queries, prepend a safety prefix that forces
     // the LLM to use uncertainty language and recommend professional consultation.
     const highRiskPrefix = riskClassification?.riskLevel === "high_risk"
       ? buildHighRiskPrefix()
       : "";
+    const evidenceRefs = buildEvidenceRefBlock(ragCitations);
     const systemContent =
       highRiskPrefix +
       buildSystemPrompt(state) +
-      (hasImages ? `\n\n${IMAGE_ANALYSIS_SYSTEM_PROMPT}` : "");
+      (evidenceRefs.block ? `\n\n${evidenceRefs.block}` : "") +
+      `\n\n${STRUCTURED_ANSWER_INSTRUCTIONS}` +
+      (hasImages ? `\n\n${IMAGE_ANALYSIS_SYSTEM_PROMPT}` : "") +
+      (attachmentEvidence.evidenceBlock ? `\n\n${ATTACHMENT_EVIDENCE_INSTRUCTIONS}` : "") +
+      (unreadableAttachmentsNotice ? `\n\n${unreadableAttachmentsNotice}` : "");
 
-    // Stream SSE response via LLM provider abstraction
+    // Open the SSE stream, but do not write any model output yet.
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
-    let fullResponse = "";
-    let streamUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-    let streamErrorMsg: string | null = null;
+    let generationUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
     const historyForModel = history.map((m) => ({
       role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
@@ -472,135 +682,230 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
     let userContent: string | VisionPart[];
     if (hasImages) {
       const parts: VisionPart[] = [];
-      if (content) parts.push({ type: "text", text: content });
+      const textForModel = content || (pdfAttachments.length > 0 ? effectiveQuestion : "");
+      if (textForModel) parts.push({ type: "text", text: textForModel });
       parts.push(...loadImageParts(userAttachments));
       userContent = parts.length > 0 ? parts : [{ type: "text", text: "[Image message]" }];
     } else {
-      userContent = content;
+      userContent = effectiveQuestion;
     }
 
-    const streamController = new AbortController();
-    const streamTimeout = setTimeout(() => streamController.abort(), 60_000);
+    const generationController = new AbortController();
+    const generationTimeout = setTimeout(() => generationController.abort(), 60_000);
 
     const config = getModelConfig();
 
-    await llm.streamChat({
-      systemPrompt: systemContent,
-      messages: [
-        ...historyForModel,
-        { role: "user", content: userContent as any },
-      ],
-      model: hasImages ? config.visionModel : config.chatModel,
-      signal: streamController.signal,
-      callbacks: {
-        onChunk: (chunk: { content: string }) => {
-          fullResponse += chunk.content;
-          res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
-        },
-        onDone: (_fullText: string, usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
-          streamUsage = usage;
-        },
-        onError: (err: unknown) => {
-          streamErrorMsg = err instanceof Error ? err.message : String(err);
-        },
-      },
-    });
+    let candidateWithFooter: string;
 
-    clearTimeout(streamTimeout);
-
-    if (streamErrorMsg) {
-      console.error("[conversations] streaming call failed:", streamErrorMsg);
-      // Roll back the persisted user message so a retry does not duplicate it.
+    if (allDocumentsUnreadable) {
+      // Deterministic safe response: never ask the model to summarise evidence
+      // that was not extracted. The static text still passes the safety gate.
+      logSafetyOutcome(req, {
+        stage: "generation",
+        action: "fallback",
+        reason: "attachment_unreadable",
+      });
+      candidateWithFooter = UNREADABLE_ATTACHMENT_MESSAGE;
+    } else {
+      // Structured generation: one validated JSON object, buffered. Groq does not
+      // stream structured outputs, and this route only writes text after
+      // validation anyway, so the client-visible SSE contract is unchanged.
+      let generation: Awaited<ReturnType<typeof llm.generateStructured>> | undefined;
       try {
-        await db.delete(messagesTable).where(eq(messagesTable.id, userMessage.id));
-        if (hasImages) {
-          await db
-            .update(chatAttachmentsTable)
-            .set({ messageId: null, conversationId: null })
-            .where(inArray(chatAttachmentsTable.id, attachmentIds));
-        }
-      } catch {
-        // best-effort rollback
+        generation = await withTimeout(
+          llm.generateStructured({
+            systemPrompt: systemContent,
+            messages: [
+              ...historyForModel,
+              { role: "user", content: userContent },
+            ],
+            model: hasImages ? config.visionModel : config.chatModel,
+            schemaName: ANSWER_CONTRACT_NAME,
+            jsonSchema: ANSWER_JSON_SCHEMA as unknown as Record<string, unknown>,
+            mode: hasImages ? "json_object" : "json_schema",
+            signal: generationController.signal,
+          }),
+          60_000,
+          "structured_generation",
+        );
+      } catch (err) {
+        generation = {
+          data: null,
+          error: /abort|timeout|timed out/i.test(
+            err instanceof Error ? err.message : String(err),
+          )
+            ? "provider_timeout"
+            : "provider_error",
+        };
+      } finally {
+        // If our own timeout won the race, make sure the in-flight provider call
+        // is cancelled rather than left running in the background.
+        if (generation?.error === "provider_timeout") generationController.abort();
+        clearTimeout(generationTimeout);
       }
-      res.write(`data: ${JSON.stringify({ error: streamErrorMsg })}\n\n`);
-      res.end();
-      return;
+
+      // Defensive: a rejected generation is always mapped above, but never let an
+      // undefined result fall through to the contract parser.
+      if (!generation) {
+        generation = { data: null, error: "provider_error" };
+      }
+
+      if (generation.usage) generationUsage = generation.usage;
+
+      if (generation.error) {
+        logSafetyOutcome(req, {
+          stage: "generation",
+          action: "error",
+          reason: generation.error,
+        });
+
+        // Roll back the persisted user message so a retry does not duplicate it.
+        try {
+          await db.delete(messagesTable).where(eq(messagesTable.id, userMessage.id));
+          if (hasAttachments) {
+            await db
+              .update(chatAttachmentsTable)
+              .set({ messageId: null, conversationId: null })
+              .where(inArray(chatAttachmentsTable.id, attachmentIds));
+          }
+        } catch {
+          // best-effort rollback
+        }
+        // Generic error only; provider details are not exposed to the client.
+        res.write(`data: ${JSON.stringify({ error: SAFE_GENERATION_ERROR })}\n\n`);
+        res.end();
+        return;
+      }
+
+      // Validate the structured payload before rendering anything. Malformed or
+      // incomplete output, and citations that do not resolve to retrieved
+      // evidence, become the static safe fallback. That fallback is still subject
+      // to the safety gate and citation validator below.
+      const parsedContract = parseAnswerContract(generation.data);
+      if (!parsedContract.ok) {
+        logSafetyOutcome(req, {
+          stage: "generation",
+          action: "fallback",
+          reason: `structured_response_${parsedContract.reason}`,
+        });
+        candidateWithFooter = SAFE_FALLBACK_MESSAGE;
+      } else {
+        const resolved = resolveAnswerContract(
+          parsedContract.value,
+          evidenceRefs.references,
+          ragCitations,
+        );
+        if (!resolved.ok) {
+          logSafetyOutcome(req, {
+            stage: "generation",
+            action: "fallback",
+            reason: `structured_response_${resolved.reason}`,
+          });
+          candidateWithFooter = SAFE_FALLBACK_MESSAGE;
+        } else {
+          logSafetyOutcome(req, {
+            stage: "generation",
+            action: "accepted",
+            reason: `structured_response_${resolved.reason}`,
+            citationCount: resolved.citations.length,
+          });
+          candidateWithFooter = resolved.text + buildCitationFooter(resolved.citations);
+        }
+      }
     }
 
-    state.finalResponse = fullResponse;
-
-    // ── Safety & Guardrails Evaluation ──
+    // ── Safety & Guardrails Evaluation (bounded) ──
+    let safetyEvaluation: Awaited<ReturnType<SafetyFramework["evaluate"]>> | null = null;
+    let safetyError: string | undefined;
     try {
       const safetyFramework = new SafetyFramework();
-      const safetyResult = await safetyFramework.evaluate(fullResponse, {
-        userId,
-        conversationId: id,
-        queryText: content,
+      safetyEvaluation = await withTimeout(
+        safetyFramework.evaluate(candidateWithFooter, {
+          userId,
+          conversationId: id,
+          queryText: effectiveQuestion,
+          evidenceText: ragCitations.map((c) => c.evidenceText).join("\n"),
+          retrievedChunks: ragCitations.map((c) => c.evidenceText),
+        }),
+        safetyTimeoutMs(),
+        "safety_evaluation",
+      );
+    } catch (safetyErr) {
+      safetyError = safetyErr instanceof Error ? safetyErr.message : String(safetyErr);
+      logSafetyOutcome(req, {
+        stage: "safety",
+        action: "error",
+        reason: "safety_evaluation_error",
+        errorName: safetyErr instanceof Error ? safetyErr.name : "UnknownError",
       });
+    }
 
-      if (safetyResult.action === "block" && safetyResult.fallbackMessage) {
-        fullResponse = safetyResult.fallbackMessage;
-        state.finalResponse = fullResponse;
-      }
+    // ── Final delivery gate ──
+    // Reject on: missing/incomplete safety evaluation, non-allow verdict,
+    // unverifiable citation identifiers, definitive diagnosis, or
+    // individualized medication/dosage instructions.
+    const gate = applyResponseGate({
+      generatedText: candidateWithFooter,
+      citations: ragCitations,
+      safety: safetyEvaluation,
+      safetyError,
+    });
+    const deliveredText = gate.responseText;
+    state.finalResponse = deliveredText;
 
-      // Persist safety evaluation
+    logSafetyOutcome(req, {
+      stage: "delivery",
+      action: gate.safe ? "delivered" : "fallback",
+      reason: gate.reason,
+      safetyAction: safetyEvaluation?.action ?? "unavailable",
+      safetyStatus: safetyEvaluation?.overallStatus ?? "unavailable",
+      citationCount: ragCitations.length,
+      citationValid: gate.citationValidation.valid,
+      fallbackUsed: !gate.safe,
+      riskLevel: riskClassification?.riskLevel ?? "unknown",
+    });
+
+    // ── Persist safety evaluation, including failed/timeout checks ──
+    try {
       await db.insert(safetyEvaluationsTable).values({
         userId,
         conversationId: id,
-        responseText: fullResponse,
+        responseText: deliveredText,
         queryText: content,
-        overallStatus: safetyResult.overallStatus,
-        action: safetyResult.action,
-        fallbackMessage: safetyResult.fallbackMessage,
-        originalResponse: safetyResult.originalResponse,
-        passedCount: safetyResult.results.filter((r) => r.status === "passed").length,
-        warningCount: safetyResult.results.filter((r) => r.status === "warning").length,
-        failedCount: safetyResult.results.filter((r) => r.status === "failed").length,
-        qualityScore: safetyResult.scores.qualityScore,
-        hallucinationScore: safetyResult.scores.hallucinationScore,
-        confidenceScore: safetyResult.scores.confidenceScore,
-        clinicalRiskScore: safetyResult.scores.clinicalRiskScore,
-        latencyMs: safetyResult.latencyMs,
+        overallStatus: gate.safe ? safetyEvaluation?.overallStatus ?? "passed" : "blocked",
+        action: gate.safe ? safetyEvaluation?.action ?? "allow" : "block",
+        fallbackMessage: gate.safe ? safetyEvaluation?.fallbackMessage : deliveredText,
+        originalResponse: gate.safe
+          ? safetyEvaluation?.originalResponse
+          : candidateWithFooter,
+        passedCount: safetyEvaluation?.results.filter((r) => r.status === "passed").length ?? 0,
+        warningCount: safetyEvaluation?.results.filter((r) => r.status === "warning").length ?? 0,
+        failedCount: safetyEvaluation?.results.filter((r) => r.status === "failed").length ?? 0,
+        qualityScore: safetyEvaluation?.scores.qualityScore ?? null,
+        hallucinationScore: safetyEvaluation?.scores.hallucinationScore ?? null,
+        confidenceScore: safetyEvaluation?.scores.confidenceScore ?? null,
+        clinicalRiskScore: safetyEvaluation?.scores.clinicalRiskScore ?? null,
+        latencyMs: safetyEvaluation?.latencyMs ?? null,
       }).execute();
     } catch (safetyErr) {
-      console.error("[safety] evaluation failed:", safetyErr);
+      logSafetyOutcome(req, {
+        stage: "safety_persistence",
+        action: "error",
+        reason: "safety_persistence_error",
+        errorName: safetyErr instanceof Error ? safetyErr.name : "UnknownError",
+      });
     }
 
-    // ── Build citation footer from RAG evidence ──
-    if (ragCitations.length > 0) {
-      const uniqueDocs = new Map<string, typeof ragCitations[0]>();
-      for (const c of ragCitations) {
-        if (!uniqueDocs.has(c.documentId)) uniqueDocs.set(c.documentId, c);
-      }
-      const footerLines: string[] = ["", "---", "**Sources used:**"];
-      let idx = 1;
-      for (const [, c] of uniqueDocs) {
-        const parts: string[] = [];
-        if (c.guidelineName) parts.push(c.guidelineName);
-        if (c.journal) parts.push(`*${c.journal}*`);
-        if (c.publicationDate) parts.push(`(${new Date(c.publicationDate).getFullYear()})`);
-        if (c.pmcid) parts.push(`PMCID: ${c.pmcid}`);
-        if (c.sourceUrl) parts.push(c.sourceUrl);
-        footerLines.push(`${idx}. ${parts.join(" — ")}`);
-        idx++;
-      }
-      footerLines.push("");
-      footerLines.push("*This response was grounded in retrieved medical literature. It is informational and is not a diagnosis or personalized medical advice.*");
-      const citationFooter = footerLines.join("\n");
-      fullResponse += citationFooter;
-      state.finalResponse = fullResponse;
-      // Send citation footer as a final content chunk
-      res.write(`data: ${JSON.stringify({ content: citationFooter })}\n\n`);
-    }
-
-    // ── Persist AI message ──
+    // ── Persist AI message (validated text only) ──
     const [aiMessage] = await db
       .insert(messagesTable)
-      .values({ conversationId: id, role: "assistant", content: fullResponse })
+      .values({ conversationId: id, role: "assistant", content: deliveredText })
       .returning();
 
     // ── Update conversation metadata ──
-    const lastMsgText = content || "Sent an image";
+    // Reuse the persisted user-message text so a document-only message shows
+    // "Attached a document" rather than "Sent an image".
+    const lastMsgText = content || userMessage.content || "Sent an image";
     const isFirstMessage = conv.lastMessage === null;
     await db
       .update(conversationsTable)
@@ -611,7 +916,10 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       })
       .where(eq(conversationsTable.id, id));
 
-    // Send completion event immediately so the client renders the response fast.
+    // Deliver the validated text using the existing SSE event contract.
+    for (const chunk of splitForSse(deliveredText)) {
+      res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+    }
     res.write(
       `data: ${JSON.stringify({ done: true, userMessage, aiMessage })}\n\n`,
     );
@@ -844,15 +1152,21 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
         }
 
         // ── Pipeline: Step 15b — Persist RAG citations for observability ──
-        if (ragCitations.length > 0) {
+        // Attachment citations reference chat_attachment ids, not
+        // medical_documents/document_chunks rows, so they are excluded from the
+        // knowledge-base citation table (which enforces those foreign keys).
+        const persistableCitations = ragCitations.filter(
+          (citation) => citation.sourceType !== "attachment",
+        );
+        if (persistableCitations.length > 0) {
           try {
             const citationEngine = new (await import("../lib/rag/retrieval/citationEngine")).CitationEngine();
-            await citationEngine.persistCitations(ragCitations, {
+            await citationEngine.persistCitations(persistableCitations, {
               userId,
               conversationId: id,
               pipelineStage: "diagnosis",
             });
-            console.log(`[conversations] persisted ${ragCitations.length} RAG citations`);
+            console.log(`[conversations] persisted ${persistableCitations.length} RAG citations`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             console.error("[conversations] citation persistence failed:", msg);
@@ -943,8 +1257,8 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
             userId,
             durationMs: Date.now() - conv.createdAt.getTime(),
             followUpCount: state.symptomAnalysis?.followUpQuestions?.length ?? 0,
-            tokensInput: streamUsage.promptTokens,
-            tokensOutput: streamUsage.completionTokens,
+            tokensInput: generationUsage.promptTokens,
+            tokensOutput: generationUsage.completionTokens,
             llmProvider: llm.primary?.name ?? "groq",
             llmModel: hasImages ? config.visionModel : config.chatModel,
             responseLatencyMs: 0,
@@ -962,23 +1276,29 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
             model: hasImages ? config.visionModel : config.chatModel,
             taskType: "generation",
             latencyMs: 0,
-            tokensInput: streamUsage.promptTokens,
-            tokensOutput: streamUsage.completionTokens,
+            tokensInput: generationUsage.promptTokens,
+            tokensOutput: generationUsage.completionTokens,
             success: true,
           });
         } catch (obsErr) {
           console.error("[observability] recording failed:", obsErr);
         }
       } catch (err) {
-        (req as any).log.error({ err }, "background enrichment failed");
+        (req as any).log.error(
+          { errorName: err instanceof Error ? err.name : "UnknownError" },
+          "background enrichment failed",
+        );
       }
     })();
   } catch (err) {
-    (req as any).log.error({ err }, "send message failed");
+    (req as any).log.error(
+      { errorName: err instanceof Error ? err.name : "UnknownError" },
+      "send message failed",
+    );
     if (!res.headersSent) {
       res.status(500).json({ error: "Failed to send message" });
     } else {
-      res.write(`data: ${JSON.stringify({ error: "Stream interrupted" })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: SAFE_GENERATION_ERROR })}\n\n`);
       res.end();
     }
   }

@@ -4,18 +4,27 @@ import { DocumentManager } from "../lib/medical-documents/documentManager";
 import { db, docUploadsTable, docLabValuesTable } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
+import { randomUUID } from "crypto";
+import { ensureDir, safeExtension, userDocumentsDir } from "../lib/storage/paths";
 
 const router: IRouter = Router();
 const docManager = new DocumentManager();
 
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
 const storage = multer.diskStorage({
-  destination: (_req: any, _file: any, cb: any) => cb(null, uploadDir),
-  filename: (_req: any, file: any, cb: any) => cb(null, `${Date.now()}_${file.originalname}`),
+  destination: (req: any, _file: any, cb: any) => {
+    const userId = (req as AuthRequest).userId;
+    const dir = userDocumentsDir(userId);
+    try {
+      ensureDir(dir);
+      cb(null, dir);
+    } catch (err) {
+      cb(err as Error, dir);
+    }
+  },
+  filename: (_req: any, file: any, cb: any) => {
+    const ext = safeExtension(file.originalname);
+    cb(null, `${Date.now()}_${randomUUID()}${ext}`);
+  },
 });
 const upload = multer({
   storage,

@@ -151,4 +151,7 @@ allowBuilds:
   '@swc/core': true
   esbuild: true
   msw: true
+  # postinstall is only `opencollective-postinstall || true`; the OCR WASM
+  # artifacts ship as regular package files.
+  tesseract.js: true
   unrs-resolver: true

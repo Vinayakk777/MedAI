@@ -1,6 +1,6 @@
 import { SafetyValidator, ValidationResult, SafetyContext } from "../types";
 
-const DEFINITIVE_DIAGNOSIS_PATTERNS = [
+export const DEFINITIVE_DIAGNOSIS_PATTERNS = [
   /you have\s+(cancer|diabetes|heart disease|a?ids|leukemia|lymphoma|tumor)/i,
   /you are\s+(diabetic|pregnant|hiv positive)/i,
   /this is\s+(cancer|a?ids|leukemia|lymphoma|a tumor|heart failure)/i,

@@ -29,7 +29,11 @@ export interface ProviderDocumentMeta {
 
 export interface ChunkingStrategy {
   readonly name: string;
-  chunk(text: string, options?: ChunkOptions): ChunkResult[];
+  /**
+   * Splitting is asynchronous because the implementation delegates to
+   * LangChain text splitters, whose `splitText` returns a promise.
+   */
+  chunk(text: string, options?: ChunkOptions): Promise<ChunkResult[]>;
 }
 
 export interface ChunkOptions {
@@ -108,7 +112,14 @@ export interface HybridSearchResult {
   heading?: string;
   semanticScore: number;
   keywordScore: number;
+  /** Fused score used by downstream ranking. Normalized to (0, 1] for RRF. */
   combinedScore: number;
+  /** Raw Reciprocal Rank Fusion score when RRF fusion was used. */
+  rrfScore?: number;
+  /** 1-based rank in the semantic list, when present. */
+  semanticRank?: number;
+  /** 1-based rank in the keyword list, when present. */
+  keywordRank?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -149,6 +160,15 @@ export interface CitationEvidence {
   journal?: string;
   pmcid?: string;
   sourceUrl?: string;
+  /** 1-based page number for citations that come from an uploaded document. */
+  pageNumber?: number;
+  /** Original file name for user-uploaded documents. */
+  sourceName?: string;
+  /**
+   * Provenance class. Attachment citations are request-scoped and must not be
+   * written to the shared knowledge-base citation tables.
+   */
+  sourceType?: "knowledge_base" | "attachment";
 }
 
 export interface CitationGroup {
@@ -169,6 +189,8 @@ export interface PipelineMetrics {
   chunksAfterDedup: number;
   usedQueryRewrite: boolean;
   usedLLMRerank: boolean;
+  /** Fusion strategy used for this retrieval. */
+  retrievalFusion?: "rrf" | "weighted";
 }
 
 // ─── RAG Engine ───

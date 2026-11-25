@@ -100,6 +100,16 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      // PDF/OCR tooling: pdfjs-dist ships worker/WASM assets, tesseract.js
+      // spawns workers and fetches trained-data files, and @napi-rs/canvas is a
+      // native module. All three are loaded lazily at runtime and must stay
+      // outside the bundle.
+      "pdfjs-dist",
+      "pdfjs-dist/*",
+      "tesseract.js",
+      "tesseract.js-core",
+      "@napi-rs/canvas",
+      "@napi-rs/canvas-*",
     ],
     sourcemap: "linked",
     plugins: [

@@ -12,6 +12,7 @@ import {
   Pause,
   Play,
   ImageIcon,
+  FileText,
   RotateCcw,
 } from "lucide-react";
 import { MarkdownContent } from "./MarkdownContent";
@@ -25,6 +26,8 @@ export type Attachment = {
   size?: number;
   width?: number;
   height?: number;
+  type?: "image" | "document";
+  pageCount?: number;
 };
 
 export type Message = {
@@ -127,23 +130,49 @@ export function ChatMessage({ message, isLatest, onRetry }: ChatMessageProps) {
           >
             {message.attachments && message.attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {message.attachments.map((att) => (
-                  <a
-                    key={att.id}
-                    href={att.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`View attached image ${att.name}`}
-                    className="block"
-                  >
-                    <img
-                      src={att.url}
-                      alt={att.name}
-                      loading="lazy"
-                      className="w-24 h-24 rounded-lg object-cover border border-white/20 shadow-md hover:opacity-90 transition-opacity"
-                    />
-                  </a>
-                ))}
+                {message.attachments.map((att) => {
+                  const isPdf =
+                    att.type === "document" || att.mimeType === "application/pdf";
+                  if (isPdf) {
+                    return (
+                      <a
+                        key={att.id}
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Open attached document ${att.name}`}
+                        className="inline-flex items-center gap-2 max-w-[220px] rounded-lg border border-white/20 bg-white/10 px-2.5 py-2 text-primary-foreground hover:bg-white/15 transition-colors"
+                      >
+                        <FileText className="w-4 h-4 flex-shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-medium truncate">
+                            {att.name}
+                          </span>
+                          <span className="block text-[9px] opacity-70">
+                            PDF{att.pageCount ? ` · ${att.pageCount} page${att.pageCount === 1 ? "" : "s"}` : ""}
+                          </span>
+                        </span>
+                      </a>
+                    );
+                  }
+                  return (
+                    <a
+                      key={att.id}
+                      href={att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`View attached image ${att.name}`}
+                      className="block"
+                    >
+                      <img
+                        src={att.url}
+                        alt={att.name}
+                        loading="lazy"
+                        className="w-24 h-24 rounded-lg object-cover border border-white/20 shadow-md hover:opacity-90 transition-opacity"
+                      />
+                    </a>
+                  );
+                })}
               </div>
             )}
             {message.content && <span>{message.content}</span>}

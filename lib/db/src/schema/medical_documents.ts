@@ -28,9 +28,17 @@ export const IMAGE_FINDING_CATEGORIES = [
 
 export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
 
-// ─── Medical Documents ───
+// ─── User-uploaded Medical Documents ───
+//
+// This table used to be declared as `medical_documents`, which collided with
+// the knowledge-base document table in `medical_knowledge.ts`. The two have
+// incompatible shapes, so one of them could never work against a real
+// database. User uploads now live in their own `user_documents` table; the
+// knowledge base keeps `medical_documents`. See
+// `lib/db/migrations/2026_11_24_chat_document_attachments.sql` for the
+// data-preserving rename.
 
-export const docUploadsTable = pgTable("medical_documents", {
+export const docUploadsTable = pgTable("user_documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").notNull(),
   conversationId: text("conversation_id"),

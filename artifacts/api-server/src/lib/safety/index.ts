@@ -1,6 +1,9 @@
 export { SafetyFramework } from "./framework";
 export { SafetyCache } from "./safetyCache";
 export { classifyQueryRisk, buildHighRiskPrefix, buildInsufficientInfoResponse } from "./queryClassifier";
+export { applyResponseGate, SAFE_FALLBACK_MESSAGE } from "./responseGate";
+export { validateCitations } from "./citationValidation";
+export { sanitizeUntrustedEvidence, wrapUntrustedEvidence } from "./untrustedEvidence";
 export { ClinicalSafetyValidator } from "./validators/clinicalSafety";
 export { HallucinationDetector } from "./validators/hallucinationDetector";
 export { MedicalConsistencyChecker } from "./validators/medicalConsistency";

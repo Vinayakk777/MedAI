@@ -2,6 +2,15 @@ export { RagEngine, getRagEngine, resetRagEngine } from "./ragEngine";
 export { RagCache, ragCache } from "./cache";
 export { IngestionPipeline } from "./ingestion/pipeline";
 export { HybridSearchEngine } from "./retrieval/hybridSearch";
+export { MedAIHybridRetriever } from "./retrieval/langchainRetriever";
+export { MedAIReRankCompressor } from "./retrieval/langchainCompressor";
+export {
+  hybridResultToDocument,
+  documentToHybridResult,
+  reRankedResultToDocument,
+  documentToReRankedResult,
+  RETRIEVAL_METADATA_KEY,
+} from "./retrieval/documentBridge";
 export { SimpleReRanker, DiversityReRanker } from "./retrieval/reRanker";
 export { LLMReRanker } from "./retrieval/llmReRanker";
 export { QueryRewriter } from "./retrieval/queryRewriter";

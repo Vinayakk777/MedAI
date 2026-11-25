@@ -10,9 +10,18 @@ import { ContextSelector } from "./retrieval/contextSelector";
 import { CitationEngine } from "./retrieval/citationEngine";
 import { PgVectorStore } from "./vector-store/pgVectorStore";
 import { EmbeddingProvider, VectorStore } from "./types";
+import { MedAIHybridRetriever } from "./retrieval/langchainRetriever";
+import { MedAIReRankCompressor } from "./retrieval/langchainCompressor";
+import { documentToReRankedResult } from "./retrieval/documentBridge";
+import type { DocumentInterface } from "@langchain/core/documents";
+import {
+  resolveRetrievalConfig,
+  type RetrievalConfig,
+} from "./retrieval/retrievalConfig";
 import { ragCache } from "./cache";
 import { createEmbedder } from "./embeddings/embedder";
 import { liveSearchAndIngest } from "./providers/pubmedLive";
+import { sanitizeUntrustedEvidence } from "../safety/untrustedEvidence";
 
 /**
  * RAG Engine — Improved Pipeline Architecture
@@ -47,11 +56,13 @@ export class RagEngine {
   private contextSelector: ContextSelector;
   private citationEngine: CitationEngine;
   private maxRetries: number;
+  private retrievalConfig: RetrievalConfig;
 
   constructor(params?: {
     vectorStore?: VectorStore;
     embedder?: EmbeddingProvider;
     maxRetries?: number;
+    retrievalConfig?: Partial<RetrievalConfig>;
   }) {
     this.vectorStore = params?.vectorStore ?? new PgVectorStore();
     this.embedder = params?.embedder ?? createEmbedder();
@@ -62,6 +73,7 @@ export class RagEngine {
     this.contextSelector = new ContextSelector();
     this.citationEngine = new CitationEngine();
     this.maxRetries = params?.maxRetries ?? 2;
+    this.retrievalConfig = resolveRetrievalConfig(params?.retrievalConfig);
   }
 
   async query(query: RagQuery): Promise<RagResponse> {
@@ -169,18 +181,39 @@ export class RagEngine {
     }
 
     // Retrieve from both semantic (vector) and keyword (tsvector) indices.
-    // Over-retrieve by 2x to give reranker more candidates.
+    // Over-retrieve to give the re-ranker more candidates. Fusion strategy,
+    // weights, candidate counts and the final top K are explicit config.
+    //
+    // LangChain is the retrieval interface here: `MedAIHybridRetriever` wraps
+    // the existing `HybridSearchEngine` (pgvector + PostgreSQL FTS + weighted
+    // or RRF fusion) and returns LangChain `Document`s carrying MedAI chunk
+    // provenance. The SQL and fusion logic are unchanged.
     const retrievalStart = Date.now();
-    const hybridResults = await this.hybridSearch.search({
-      query: searchQuery,
-      topK: topK * 3,
-      minScore: 0.25,
-      filters: query.filters,
+    const hybridTopK = Math.max(
+      1,
+      Math.ceil(topK * this.retrievalConfig.finalTopKMultiplier),
+    );
+    const retriever = new MedAIHybridRetriever({
+      engine: this.hybridSearch,
+      search: {
+        topK: hybridTopK,
+        filters: query.filters,
+        fusion: this.retrievalConfig.fusion,
+        candidateMultiplier: this.retrievalConfig.candidateMultiplier,
+        rrfK: this.retrievalConfig.rrfK,
+        semanticWeight: this.retrievalConfig.semanticWeight,
+        keywordWeight: this.retrievalConfig.keywordWeight,
+        minCombinedScore: this.retrievalConfig.minCombinedScore,
+        minSemanticScore: this.retrievalConfig.minSemanticScore,
+        minKeywordScore: this.retrievalConfig.minKeywordScore,
+      },
     });
+    const retrievedDocuments = await retriever.invoke(searchQuery);
     metrics.retrievalMs = Date.now() - retrievalStart;
-    metrics.totalChunksRetrieved = hybridResults.length;
+    metrics.totalChunksRetrieved = retrievedDocuments.length;
+    metrics.retrievalFusion = this.retrievalConfig.fusion;
 
-    if (hybridResults.length === 0) {
+    if (retrievedDocuments.length === 0) {
       return {
         query: normalizedQuery,
         hasEvidence: false,
@@ -198,20 +231,45 @@ export class RagEngine {
     // ── Stage 3: Re-ranking ──
     // Use LLM reranking for queries with enough candidates (4+ chunks).
     // Fall back to SimpleReRanker for smaller result sets or on failure.
+    // Both re-rankers are exposed through LangChain's document compressor
+    // contract; scoring and fallbacks are unchanged.
     const rerankStart = Date.now();
-    let reRanked;
-    if (hybridResults.length >= 4) {
+    const rerankTopK = topK * 2;
+    let compressedDocuments: DocumentInterface[];
+    if (retrievedDocuments.length >= 4) {
       try {
-        reRanked = await this.llmReRanker.reRank(searchQuery, hybridResults, topK * 2);
+        const compressor = new MedAIReRankCompressor(this.llmReRanker, {
+          topK: rerankTopK,
+        });
+        compressedDocuments = await compressor.compressDocuments(
+          retrievedDocuments,
+          searchQuery,
+        );
         metrics.usedLLMRerank = true;
       } catch {
         // LLM reranker falls back internally, but if it still fails:
-        reRanked = await this.simpleReRanker.reRank(searchQuery, hybridResults, topK * 2);
+        const compressor = new MedAIReRankCompressor(this.simpleReRanker, {
+          topK: rerankTopK,
+        });
+        compressedDocuments = await compressor.compressDocuments(
+          retrievedDocuments,
+          searchQuery,
+        );
       }
     } else {
-      reRanked = await this.simpleReRanker.reRank(searchQuery, hybridResults, topK * 2);
+      const compressor = new MedAIReRankCompressor(this.simpleReRanker, {
+        topK: rerankTopK,
+      });
+      compressedDocuments = await compressor.compressDocuments(
+        retrievedDocuments,
+        searchQuery,
+      );
     }
     metrics.rerankMs = Date.now() - rerankStart;
+
+    // Re-enter the MedAI domain model for context selection, citation
+    // building and the safety gates.
+    const reRanked = compressedDocuments.map(documentToReRankedResult);
 
     // ── Stage 4: Context Selection ──
     // Deduplicate near-identical chunks, enforce source diversity,
@@ -239,7 +297,8 @@ export class RagEngine {
         `retrieval=${metrics.retrievalMs}ms, rerank=${metrics.rerankMs}ms, ` +
         `context=${metrics.contextSelectionMs}ms, ` +
         `chunks=${metrics.totalChunksRetrieved}→${metrics.chunksAfterDedup}, ` +
-        `rewrite=${metrics.usedQueryRewrite}, llm_rerank=${metrics.usedLLMRerank}`
+        `rewrite=${metrics.usedQueryRewrite}, llm_rerank=${metrics.usedLLMRerank}, ` +
+        `fusion=${metrics.retrievalFusion ?? "unknown"}`
       );
     }
 
@@ -317,18 +376,23 @@ export class RagEngine {
     evidenceBlock += `Retrieved from ${response.evidenceGroups.length} source(s):\n\n`;
 
     for (const group of response.evidenceGroups) {
-      evidenceBlock += `Source: ${group.organization}\n`;
+      const organization = sanitizeUntrustedEvidence(group.organization).text;
+      evidenceBlock += `Source: ${organization}\n`;
       for (const citation of group.citations.slice(0, 3)) {
         const dateStr = citation.publicationDate
           ? new Date(citation.publicationDate).toLocaleDateString("en-US", {
               year: "numeric", month: "long",
             })
           : "Date not specified";
+        const guidelineName = citation.guidelineName
+          ? sanitizeUntrustedEvidence(citation.guidelineName).text
+          : "";
+        const evidenceText = sanitizeUntrustedEvidence(citation.evidenceText).text.slice(0, 300);
         evidenceBlock += `- [${citation.confidence.toUpperCase()}] `;
-        if (citation.guidelineName) evidenceBlock += `${citation.guidelineName} (${dateStr}): `;
-        evidenceBlock += `${citation.evidenceText.slice(0, 300)}...\n`;
-        if (citation.author) evidenceBlock += `  Authors: ${citation.author}\n`;
-        if (citation.journal) evidenceBlock += `  Journal: ${citation.journal}\n`;
+        if (guidelineName) evidenceBlock += `${guidelineName} (${dateStr}): `;
+        evidenceBlock += `${evidenceText}...\n`;
+        if (citation.author) evidenceBlock += `  Authors: ${sanitizeUntrustedEvidence(citation.author).text}\n`;
+        if (citation.journal) evidenceBlock += `  Journal: ${sanitizeUntrustedEvidence(citation.journal).text}\n`;
         if (citation.pmcid) evidenceBlock += `  PMCID: ${citation.pmcid}\n`;
         if (citation.sourceUrl) evidenceBlock += `  URL: ${citation.sourceUrl}\n`;
       }

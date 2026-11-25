@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, KeyboardEvent, DragEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, MicOff, Paperclip, X, ImagePlus, Loader2 } from "lucide-react";
+import { Send, Mic, MicOff, Paperclip, X, ImagePlus, FileText, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSpeechRecognition, type VoiceErrorCode } from "@/hooks/use-speech-recognition";
 import { MAX_ATTACHMENTS } from "@/lib/image";
@@ -9,6 +9,7 @@ export type PendingAttachment = {
   localId: string;
   file: Blob;
   name: string;
+  kind: "image" | "pdf";
   previewUrl: string;
   width?: number;
   height?: number;
@@ -104,7 +105,7 @@ export function ChatInput({
       const room = MAX_ATTACHMENTS - attachments.length;
       const accepted = list.slice(0, Math.max(0, room));
       if (accepted.length < list.length) {
-        toast({ title: "Too many images", description: `You can attach up to ${MAX_ATTACHMENTS} images per message.`, variant: "destructive" });
+        toast({ title: "Too many attachments", description: `You can attach up to ${MAX_ATTACHMENTS} files per message.`, variant: "destructive" });
       }
       if (accepted.length > 0) onAddFiles(accepted);
     },
@@ -175,15 +176,27 @@ export function ChatInput({
                     exit={{ opacity: 0, scale: 0.9 }}
                     className="relative group/att"
                   >
-                    <img
-                      src={att.previewUrl}
-                      alt="Attached medical image"
-                      className="w-16 h-16 rounded-xl object-cover border border-white/10 bg-white/5"
-                    />
+                    {att.kind === "pdf" ? (
+                      <div
+                        title={att.name}
+                        className="w-16 h-16 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center justify-center gap-1 px-1"
+                      >
+                        <FileText className="w-5 h-5 text-muted-foreground" />
+                        <span className="text-[8px] leading-tight text-muted-foreground/70 text-center break-all line-clamp-2">
+                          {att.name}
+                        </span>
+                      </div>
+                    ) : (
+                      <img
+                        src={att.previewUrl}
+                        alt="Attached medical image"
+                        className="w-16 h-16 rounded-xl object-cover border border-white/10 bg-white/5"
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => onRemoveAttachment?.(att.localId)}
-                      aria-label="Remove attached image"
+                      aria-label="Remove attachment"
                       className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-lg hover:bg-rose-400 transition-colors"
                     >
                       <X className="w-3 h-3" />
@@ -251,7 +264,7 @@ export function ChatInput({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
                 multiple
                 onChange={onFileInputChange}
                 className="hidden"
@@ -259,8 +272,8 @@ export function ChatInput({
               />
               <button
                 type="button"
-                aria-label="Upload medical image"
-                title="Attach a medical image (JPG, PNG, WebP)"
+                aria-label="Upload attachment"
+                title="Attach a PDF or medical image (PDF, JPG, PNG, WebP)"
                 disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
                 onClick={() => fileInputRef.current?.click()}
                 className="p-2 rounded-xl text-muted-foreground/40 hover:text-muted-foreground hover:bg-white/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -316,7 +329,13 @@ export function ChatInput({
                     className="flex items-center gap-2"
                   >
                     <span className="text-[10px] text-muted-foreground/50 tabular-nums">
-                      {isUploading ? (uploadProgress != null ? `${uploadProgress}%` : "Uploading…") : ""}
+                      {isUploading
+                        ? uploadProgress != null
+                          ? uploadProgress >= 100
+                            ? "Processing…"
+                            : `${uploadProgress}%`
+                          : "Uploading…"
+                        : ""}
                     </span>
                     <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center">
                       <motion.div
@@ -374,7 +393,7 @@ export function ChatInput({
         <p className="text-center text-[11px] text-muted-foreground/30 mt-2.5 leading-relaxed">
           MedAI may make mistakes. Verify important information with your physician. &middot;{" "}
           <span className="text-primary/50">Shift+Enter</span> for new line &middot;{" "}
-          <span className="text-primary/50">Images analysed for information only — never a diagnosis</span>
+          <span className="text-primary/50">Attachments are summarised for information only — never a diagnosis</span>
         </p>
       </div>
     </div>

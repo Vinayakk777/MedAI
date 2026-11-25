@@ -6,11 +6,15 @@
     "preinstall": "node -e \"try { require('fs').unlinkSync('package-lock.json') } catch(e) {} try { require('fs').unlinkSync('yarn.lock') } catch(e) {} if (!process.env.npm_config_user_agent?.startsWith('pnpm')) { console.error('Use pnpm instead'); process.exit(1) }\"",
     "build": "pnpm run typecheck && pnpm -r --filter \"./artifacts/api-server\" --filter \"./artifacts/medical-ai\" --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval:rag": "vitest run --config vitest.eval.config.ts --reporter=verbose"
   },
   "private": true,
   "devDependencies": {
     "prettier": "^3.8.3",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
   }
 }

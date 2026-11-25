@@ -1,5 +1,10 @@
 import { db } from "@workspace/db";
-import { medicalDocumentsTable, documentChunksTable, knowledgeSourcesTable } from "@workspace/db";
+import {
+  medicalDocumentsTable,
+  documentChunksTable,
+  knowledgeSourcesTable,
+  EMBEDDING_DIMENSIONS,
+} from "@workspace/db";
 import { eq, and, count, sql } from "drizzle-orm";
 import { EmbeddingProvider, IngestionResult } from "../types";
 import { getChunker, getAllChunkers } from "./chunkingStrategy";
@@ -38,6 +43,19 @@ export class IngestionPipeline {
     const chunker = getChunker(params.chunkerName ?? "recursive_character");
     if (!chunker) {
       return { documentId: "", title: params.title, chunkCount: 0, success: false, error: "Unknown chunker" };
+    }
+
+    // The pgvector column is fixed at EMBEDDING_DIMENSIONS. Refuse to write a
+    // document whose provider cannot satisfy that contract instead of creating
+    // an unindexable record or failing halfway through the insert.
+    if (this.embedder.dimensions !== EMBEDDING_DIMENSIONS) {
+      return {
+        documentId: "",
+        title: params.title,
+        chunkCount: 0,
+        success: false,
+        error: "embedding_dimension_mismatch",
+      };
     }
 
     // Duplicate detection: check if a document with the same title and organization already exists
@@ -81,20 +99,23 @@ export class IngestionPipeline {
       .returning();
 
     // Chunk
-    const chunks = chunker.chunk(params.content, {
+    const chunks = await chunker.chunk(params.content, {
       maxChunkSize: params.chunkOptions?.maxChunkSize ?? 1000,
       chunkOverlap: params.chunkOptions?.chunkOverlap ?? 100,
     });
 
     if (chunks.length === 0) {
+      // An empty document is not indexed. `success: false` keeps admin callers
+      // from reporting it as a completed ingestion.
       await db.update(medicalDocumentsTable)
-        .set({ isIndexed: true, chunkCount: 0 })
+        .set({ isIndexed: false, chunkCount: 0 })
         .where(eq(medicalDocumentsTable.id, doc.id));
       return {
         documentId: doc.id,
         title: params.title,
         chunkCount: 0,
-        success: true,
+        success: false,
+        error: "no_chunks",
       };
     }
 
@@ -111,8 +132,14 @@ export class IngestionPipeline {
       }
     }
 
-    // Insert chunks with enriched metadata
-    const validRecords = chunkRecords.filter((r) => r.embedding.length === this.embedder.dimensions);
+    // Insert chunks with enriched metadata. Every embedding must match both the
+    // provider's declared dimension and the database column dimension; a dropped
+    // chunk means the document is not fully indexed.
+    const validRecords = chunkRecords.filter(
+      (r) =>
+        r.embedding.length === this.embedder.dimensions &&
+        r.embedding.length === EMBEDDING_DIMENSIONS,
+    );
     if (validRecords.length > 0) {
       await db.insert(documentChunksTable).values(
         validRecords.map((r) => ({
@@ -140,16 +167,26 @@ export class IngestionPipeline {
       );
     }
 
-    // Update document
+    // Update document. Only a document whose every chunk was persisted counts
+    // as indexed.
+    const fullyIndexed = validRecords.length === chunks.length;
     await db.update(medicalDocumentsTable)
-      .set({ isIndexed: true, chunkCount: validRecords.length })
+      .set({ isIndexed: fullyIndexed, chunkCount: validRecords.length })
       .where(eq(medicalDocumentsTable.id, doc.id));
 
     return {
       documentId: doc.id,
       title: params.title,
       chunkCount: validRecords.length,
-      success: true,
+      success: fullyIndexed,
+      ...(fullyIndexed
+        ? {}
+        : {
+            error:
+              validRecords.length === 0
+                ? "embedding_dimension_mismatch"
+                : "chunks_dropped",
+          }),
     };
   }
 

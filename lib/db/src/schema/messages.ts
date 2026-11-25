@@ -5,13 +5,15 @@ import { conversationsTable } from "./conversations";
 
 export const messageAttachmentSchema = z.object({
   id: z.string().uuid(),
-  type: z.literal("image").default("image"),
+  /** "image" is analysed by the vision model; "document" contributes extracted text. */
+  type: z.enum(["image", "document"]).default("image"),
   url: z.string(),
   mimeType: z.string(),
   name: z.string(),
   size: z.number().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
+  pageCount: z.number().optional(),
 });
 
 export const messagesTable = pgTable("messages", {

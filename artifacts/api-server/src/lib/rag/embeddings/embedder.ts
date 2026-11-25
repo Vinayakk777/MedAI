@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { OpenAIEmbeddings } from "@langchain/openai";
 import { EmbeddingProvider } from "../types";
 import { createHash } from "crypto";
 
@@ -91,46 +91,41 @@ export class HuggingFaceEmbedder implements EmbeddingProvider {
 
 // ─── OpenAI Embedding Provider ───
 
+/**
+ * Adapter over LangChain's `OpenAIEmbeddings`.
+ *
+ * MedAI keeps the `EmbeddingProvider` contract (model name, declared
+ * dimensions, batching) because ingestion rejects any embedding whose length
+ * does not match `dimensions`, and the pgvector column is fixed at 1536.
+ * LangChain performs the actual batching and API calls.
+ */
 export class OpenAIEmbedder implements EmbeddingProvider {
   readonly model: string;
   readonly dimensions: number;
-  private client: OpenAI;
+  private embeddings: OpenAIEmbeddings;
 
   constructor(params?: { model?: string; dimensions?: number; apiKey?: string }) {
     this.model = params?.model ?? "text-embedding-3-small";
     this.dimensions = params?.dimensions ?? 1536;
-    this.client = new OpenAI({
+    this.embeddings = new OpenAIEmbeddings({
       apiKey: params?.apiKey ?? process.env.OPENAI_API_KEY,
+      model: this.model,
+      dimensions: this.dimensions,
+      batchSize: 2048,
+      // MedAI normalizes whitespace itself before calling the provider.
+      stripNewLines: false,
     });
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
     const cleaned = text.replace(/\s+/g, " ").trim();
-    const response = await this.client.embeddings.create({
-      model: this.model,
-      input: cleaned,
-      dimensions: this.dimensions,
-    });
-    return response.data[0]?.embedding ?? [];
+    return this.embeddings.embedQuery(cleaned);
   }
 
   async generateEmbeddings(batch: string[]): Promise<number[][]> {
     const cleaned = batch.map((t) => t.replace(/\s+/g, " ").trim());
-    const results: number[][] = [];
-
-    for (let i = 0; i < cleaned.length; i += 2048) {
-      const chunk = cleaned.slice(i, i + 2048);
-      const response = await this.client.embeddings.create({
-        model: this.model,
-        input: chunk,
-        dimensions: this.dimensions,
-      });
-      for (const item of response.data) {
-        results[item.index] = item.embedding;
-      }
-    }
-
-    return results;
+    if (cleaned.length === 0) return [];
+    return this.embeddings.embedDocuments(cleaned);
   }
 }
 

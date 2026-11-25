@@ -1,7 +1,7 @@
 # MedAI RAG Golden Evaluation
 
 - Dataset: **medai-rag-golden** v1.0.0
-- Generated: 2026-11-25T05:34:28.192Z
+- Generated: 2026-11-25T12:39:46.862Z
 - Cases: 12 | Documents: 12 | Chunks: 14
 - Fusion: weighted
 - Network calls: no
@@ -21,8 +21,8 @@
 | Answer fact coverage | 1.000 |
 | Supported fact rate | 1.000 |
 | Route accuracy | 1.000 (12/12) |
-| Retrieval latency mean (local fixture) | 8.47 ms |
-| Retrieval latency p95 (local fixture) | 69.01 ms |
+| Retrieval latency mean (local fixture) | 15.17 ms |
+| Retrieval latency p95 (local fixture) | 105.85 ms |
 
 ## Route outcomes
 

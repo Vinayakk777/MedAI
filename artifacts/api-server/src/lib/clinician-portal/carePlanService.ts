@@ -78,6 +78,14 @@ export class CarePlanService {
     return saved.id;
   }
 
+  async getTask(taskId: string) {
+    const [task] = await db.select()
+      .from(followUpTasksTable)
+      .where(eq(followUpTasksTable.id, taskId))
+      .limit(1);
+    return task || null;
+  }
+
   async completeTask(taskId: string): Promise<void> {
     await db.update(followUpTasksTable)
       .set({ status: "completed", completedAt: new Date() })

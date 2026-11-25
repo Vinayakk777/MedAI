@@ -335,6 +335,471 @@ export function createWorkspaceDbMock() {
     "createdAt",
   ]);
 
+  // ─── Clinician portal ───
+
+  const clinicianProfilesTable = defineTable("clinicianProfiles", [
+    "id",
+    "userId",
+    "role",
+    "fullName",
+    "isActive",
+    "specialty",
+    "department",
+    "email",
+    "createdAt",
+    "updatedAt",
+  ]);
+
+  const patientAssignmentsTable = defineTable("patientAssignments", [
+    "id",
+    "clinicianId",
+    "patientUserId",
+    "relationship",
+    "isActive",
+    "assignedAt",
+    "unassignedAt",
+    "notes",
+  ]);
+
+  const physicianNotesTable = defineTable("physicianNotes", [
+    "id",
+    "patientUserId",
+    "clinicianId",
+    "consultationId",
+    "version",
+    "subjective",
+    "objective",
+    "assessment",
+    "plan",
+    "diagnosis",
+    "icdCodes",
+    "isFinalized",
+    "finalizedAt",
+    "parentVersionId",
+    "createdAt",
+    "updatedAt",
+  ]);
+
+  const aiConsultationReviewsTable = defineTable("aiConsultationReviews", [
+    "id",
+    "consultationId",
+    "patientUserId",
+    "clinicianId",
+    "aiSummary",
+    "aiDifferentialDiagnoses",
+    "aiConfidenceScore",
+    "aiRecommendations",
+    "reviewStatus",
+    "clinicianDecision",
+    "clinicianNotes",
+    "corrections",
+    "finalDiagnosis",
+    "finalDiagnosisIcd",
+    "isReviewed",
+    "reviewedAt",
+    "createdAt",
+  ]);
+
+  const carePlansTable = defineTable("carePlans", [
+    "id",
+    "patientUserId",
+    "clinicianId",
+    "title",
+    "description",
+    "goals",
+    "interventions",
+    "medications",
+    "followUpSchedule",
+    "status",
+    "startedAt",
+    "completedAt",
+    "createdAt",
+  ]);
+
+  const followUpTasksTable = defineTable("followUpTasks", [
+    "id",
+    "patientUserId",
+    "clinicianId",
+    "carePlanId",
+    "title",
+    "description",
+    "priority",
+    "status",
+    "dueDate",
+    "completedAt",
+    "assignedTo",
+    "createdAt",
+  ]);
+
+  const clinReferralsTable = defineTable("clinReferrals", [
+    "id",
+    "patientUserId",
+    "referringClinicianId",
+    "specialistClinicianId",
+    "specialty",
+    "reason",
+    "urgency",
+    "status",
+    "notes",
+    "responseNotes",
+    "respondedAt",
+    "completedAt",
+    "createdAt",
+  ]);
+
+  const fhirMappingsTable = defineTable("fhirMappings", [
+    "id",
+    "resourceType",
+    "sourceField",
+    "fhirPath",
+    "transform",
+    "vendor",
+    "isActive",
+    "createdAt",
+  ]);
+
+  const fhirExportQueueTable = defineTable("fhirExportQueue", [
+    "id",
+    "patientUserId",
+    "resourceType",
+    "resourceData",
+    "status",
+    "vendor",
+    "fhirVersion",
+    "errorMessage",
+    "exportedAt",
+    "createdAt",
+  ]);
+
+  const consentRecordsTable = defineTable("consentRecords", [
+    "id",
+    "patientUserId",
+    "consentType",
+    "status",
+    "grantedAt",
+    "revokedAt",
+    "expiresAt",
+    "grantedBy",
+    "metadata",
+  ]);
+
+  const clinicianAuditLogsTable = defineTable("clinicianAuditLogs", [
+    "id",
+    "clinicianId",
+    "patientUserId",
+    "action",
+    "resourceType",
+    "resourceId",
+    "details",
+    "ipAddress",
+    "createdAt",
+  ]);
+
+  const alertCenterTable = defineTable("alertCenter", [
+    "id",
+    "clinicianId",
+    "patientUserId",
+    "type",
+    "severity",
+    "title",
+    "message",
+    "isRead",
+    "isResolved",
+    "actionUrl",
+    "createdAt",
+  ]);
+
+  const ehrConnectionsTable = defineTable("ehrConnections", [
+    "id",
+    "clinicianId",
+    "vendor",
+    "fhirBaseUrl",
+    "apiKey",
+    "clientId",
+    "isActive",
+    "lastSyncAt",
+    "createdAt",
+  ]);
+
+  // ─── Observability ───
+
+  const consultationAnalyticsTable = defineTable("consultationAnalytics", [
+    "id",
+    "userId",
+    "conversationId",
+    "durationMs",
+    "followUpCount",
+    "tokensUsed",
+    "tokensInput",
+    "tokensOutput",
+    "llmProvider",
+    "llmModel",
+    "responseLatencyMs",
+    "retrievalLatencyMs",
+    "agentExecutionTimeMs",
+    "safetyInterventions",
+    "safetyAction",
+    "confidenceScore",
+    "hallucinationScore",
+    "qualityScore",
+    "finalRiskCategory",
+    "recommendationCategory",
+    "retrievalSuccess",
+    "chunksRetrieved",
+    "hadEscalation",
+    "hadFallback",
+    "errorType",
+    "errorMessage",
+    "createdAt",
+  ]);
+
+  const userFeedbackTable = defineTable("userFeedback", [
+    "id",
+    "userId",
+    "conversationId",
+    "rating",
+    "accuracyRating",
+    "easeOfUnderstanding",
+    "helpfulness",
+    "trustLevel",
+    "freeText",
+    "categories",
+    "isResolved",
+    "createdAt",
+  ]);
+
+  const feedbackPatternsTable = defineTable("feedbackPatterns", [
+    "id",
+    "pattern",
+    "label",
+    "keywordMatch",
+    "frequency",
+    "firstSeen",
+    "lastSeen",
+  ]);
+
+  const aiQualityMetricsTable = defineTable("aiQualityMetrics", [
+    "id",
+    "periodStart",
+    "periodEnd",
+    "resolution",
+    "avgConfidenceScore",
+    "avgHallucinationScore",
+    "avgQualityScore",
+    "totalEvaluations",
+    "createdAt",
+  ]);
+
+  const providerCallLogsTable = defineTable("providerCallLogs", [
+    "id",
+    "conversationId",
+    "userId",
+    "provider",
+    "model",
+    "taskType",
+    "latencyMs",
+    "tokensInput",
+    "tokensOutput",
+    "cost",
+    "success",
+    "errorType",
+    "statusCode",
+    "createdAt",
+  ]);
+
+  const promptVersionsTable = defineTable("promptVersions", [
+    "id",
+    "name",
+    "version",
+    "content",
+    "description",
+    "changeLog",
+    "author",
+    "status",
+    "tags",
+    "parentVersionId",
+    "metadata",
+    "performanceBefore",
+    "performanceAfter",
+    "createdAt",
+    "activatedAt",
+  ]);
+
+  const promptDeploymentsTable = defineTable("promptDeployments", [
+    "id",
+    "promptVersionId",
+    "environment",
+    "trafficPercent",
+    "isActive",
+    "deployedBy",
+    "deployedAt",
+    "deactivatedAt",
+  ]);
+
+  const abTestAssignmentsTable = defineTable("abTestAssignments", [
+    "id",
+    "userId",
+    "conversationId",
+    "promptName",
+    "variantA",
+    "variantB",
+    "assignedVariant",
+    "createdAt",
+  ]);
+
+  const providerPerformanceTable = defineTable("providerPerformance", [
+    "id",
+    "provider",
+    "model",
+    "periodStart",
+    "periodEnd",
+    "totalCalls",
+    "totalTokens",
+    "totalCost",
+    "avgLatencyMs",
+    "p50LatencyMs",
+    "p95LatencyMs",
+    "p99LatencyMs",
+    "failureCount",
+    "failureRate",
+    "avgUserSatisfaction",
+    "avgQualityScore",
+    "hallucinationRate",
+    "avgConfidence",
+    "successCount",
+    "createdAt",
+  ]);
+
+  const evaluationRunsTable = defineTable("evaluationRuns", [
+    "id",
+    "name",
+    "promptVersionId",
+    "status",
+    "totalScenarios",
+    "passed",
+    "failed",
+    "avgAccuracy",
+    "avgSafetyScore",
+    "avgDiagnosisConsistency",
+    "avgFollowUpQuality",
+    "avgUserSatisfaction",
+    "avgLatencyMs",
+    "reportData",
+    "triggeredBy",
+    "createdAt",
+    "completedAt",
+  ]);
+
+  const evaluationResultsTable = defineTable("evaluationResults", [
+    "id",
+    "runId",
+    "scenarioId",
+    "scenarioName",
+    "passed",
+    "accuracyScore",
+    "safetyScore",
+    "consistencyScore",
+    "followUpScore",
+    "latencyMs",
+    "errors",
+    "details",
+    "createdAt",
+  ]);
+
+  const alertConfigsTable = defineTable("alertConfigs", [
+    "id",
+    "name",
+    "metric",
+    "operator",
+    "threshold",
+    "windowMinutes",
+    "cooldownMinutes",
+    "severity",
+    "channels",
+    "enabled",
+    "lastFiredAt",
+    "createdBy",
+    "createdAt",
+    "updatedAt",
+  ]);
+
+  const alertEventsTable = defineTable("alertEvents", [
+    "id",
+    "configId",
+    "metric",
+    "metricValue",
+    "message",
+    "severity",
+    "acknowledged",
+    "acknowledgedBy",
+    "createdAt",
+  ]);
+
+  const auditLogsTable = defineTable("auditLogs", [
+    "id",
+    "userId",
+    "action",
+    "resourceType",
+    "resourceId",
+    "details",
+    "ipAddress",
+    "userAgent",
+    "createdAt",
+  ]);
+
+  const anonymizedEventsTable = defineTable("anonymizedEvents", [
+    "id",
+    "eventType",
+    "eventData",
+    "sessionHash",
+    "createdAt",
+  ]);
+
+  // ─── Voice ───
+
+  const voiceSessionsTable = defineTable("voiceSessions", [
+    "id",
+    "userId",
+    "conversationId",
+    "status",
+    "language",
+    "mode",
+    "turnCount",
+    "duration",
+    "metadata",
+    "startedAt",
+    "endedAt",
+    "createdAt",
+  ]);
+
+  const voiceTranscriptsTable = defineTable("voiceTranscripts", [
+    "id",
+    "sessionId",
+    "source",
+    "text",
+    "originalText",
+    "confidence",
+    "turnNumber",
+    "isFinal",
+    "isEdited",
+    "editedText",
+    "audioChunkId",
+    "processingTimeMs",
+    "entities",
+    "createdAt",
+  ]);
+
+  const voiceAudioChunksTable = defineTable("voiceAudioChunks", [
+    "id",
+    "sessionId",
+    "storagePath",
+    "mimeType",
+    "duration",
+    "sizeBytes",
+    "transcriptId",
+    "createdAt",
+  ]);
+
   return {
     EMBEDDING_DIMENSIONS: 1536,
     db: fake.db,
@@ -356,5 +821,36 @@ export function createWorkspaceDbMock() {
     docImageAnalysesTable,
     docTrendComparisonsTable,
     docClinicalSummariesTable,
+    clinicianProfilesTable,
+    patientAssignmentsTable,
+    physicianNotesTable,
+    aiConsultationReviewsTable,
+    carePlansTable,
+    followUpTasksTable,
+    clinReferralsTable,
+    fhirMappingsTable,
+    fhirExportQueueTable,
+    consentRecordsTable,
+    clinicianAuditLogsTable,
+    alertCenterTable,
+    ehrConnectionsTable,
+    consultationAnalyticsTable,
+    userFeedbackTable,
+    feedbackPatternsTable,
+    aiQualityMetricsTable,
+    providerCallLogsTable,
+    providerPerformanceTable,
+    promptVersionsTable,
+    promptDeploymentsTable,
+    abTestAssignmentsTable,
+    evaluationRunsTable,
+    evaluationResultsTable,
+    alertConfigsTable,
+    alertEventsTable,
+    auditLogsTable,
+    anonymizedEventsTable,
+    voiceSessionsTable,
+    voiceTranscriptsTable,
+    voiceAudioChunksTable,
   };
 }

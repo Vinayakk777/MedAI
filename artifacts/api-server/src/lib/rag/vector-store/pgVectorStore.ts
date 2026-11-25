@@ -102,38 +102,11 @@ export class PgVectorStore extends BaseVectorStore {
           metadata: r.metadata ? (typeof r.metadata === "string" ? JSON.parse(r.metadata) : r.metadata) : undefined,
         }));
     } catch {
-      // Fallback for when pgvector is not available
-      return this.fallbackSearch(query);
+      // When pgvector is unavailable we cannot compute relevance. Returning
+      // arbitrary rows with a synthetic score would present unrelated chunks
+      // as retrieved medical evidence, so degrade to an empty result set.
+      return [];
     }
-  }
-
-  private async fallbackSearch(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
-    const topK = query.topK ?? 10;
-    const results = await db
-      .select({
-        chunkId: documentChunksTable.id,
-        documentId: documentChunksTable.documentId,
-        sourceId: documentChunksTable.sourceId,
-        content: documentChunksTable.content,
-        contentPreview: documentChunksTable.contentPreview,
-        section: documentChunksTable.section,
-        heading: documentChunksTable.heading,
-        metadata: documentChunksTable.metadata,
-      })
-      .from(documentChunksTable)
-      .limit(topK);
-
-    return results.map((r) => ({
-      chunkId: r.chunkId,
-      documentId: r.documentId,
-      sourceId: r.sourceId ?? undefined,
-      content: r.content,
-      contentPreview: r.contentPreview ?? undefined,
-      section: r.section ?? undefined,
-      heading: r.heading ?? undefined,
-      score: 0.5,
-      metadata: r.metadata as Record<string, unknown> | undefined,
-    }));
   }
 
   async deleteChunk(chunkId: string): Promise<void> {

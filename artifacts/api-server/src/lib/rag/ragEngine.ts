@@ -79,10 +79,11 @@ export class RagEngine {
   async query(query: RagQuery): Promise<RagResponse> {
     const startTime = Date.now();
     const normalizedQuery = query.text.replace(/\s+/g, " ").trim();
+    const cacheScope = this.cacheScope(query);
 
     // Check cache
     if (query.useCache !== false) {
-      const cached = ragCache.get(normalizedQuery, query.pipelineStage);
+      const cached = ragCache.get(normalizedQuery, query.pipelineStage, cacheScope);
       if (cached) return cached;
     }
 
@@ -96,7 +97,7 @@ export class RagEngine {
         result.wasFallback = wasFallback;
 
         // Cache the result
-        ragCache.set(normalizedQuery, result, query.pipelineStage);
+        ragCache.set(normalizedQuery, result, query.pipelineStage, undefined, cacheScope);
 
         // Log retrieval
         this.logRetrieval(normalizedQuery, result, query);
@@ -125,8 +126,17 @@ export class RagEngine {
       wasFallback: true,
     };
 
-    ragCache.set(normalizedQuery, noEvidenceResult, query.pipelineStage, 30000);
+    ragCache.set(normalizedQuery, noEvidenceResult, query.pipelineStage, 30000, cacheScope);
     return noEvidenceResult;
+  }
+
+  private cacheScope(query: RagQuery): string | undefined {
+    const parts: string[] = [];
+    if (query.userId) parts.push(`u:${query.userId}`);
+    if (query.filters && query.filters.length > 0) {
+      parts.push(`f:${JSON.stringify(query.filters)}`);
+    }
+    return parts.length > 0 ? parts.join("|") : undefined;
   }
 
   private async executeQuery(normalizedQuery: string, query: RagQuery): Promise<RagResponse> {

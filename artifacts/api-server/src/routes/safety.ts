@@ -53,7 +53,7 @@ router.post("/safety/evaluate", requireAuth, async (req: AuthRequest, res) => {
 
     res.json({ evaluationId: saved.id, ...evaluation });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -77,7 +77,7 @@ router.get("/safety/evaluations", requireAuth, async (req: AuthRequest, res) => 
 
     res.json(results);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -127,7 +127,7 @@ router.get("/safety/violations", requireAuth, async (req: AuthRequest, res) => {
 
     res.json(results);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -145,7 +145,7 @@ router.get("/safety/hallucinations", requireAuth, async (req: AuthRequest, res) 
 
     res.json(results);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -163,7 +163,7 @@ router.get("/safety/quality", requireAuth, async (req: AuthRequest, res) => {
 
     res.json(results);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -220,7 +220,7 @@ router.get("/safety/summary", requireAuth, async (req: AuthRequest, res) => {
       totalBlocked: blockedCount.count,
     });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

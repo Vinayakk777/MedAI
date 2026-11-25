@@ -36,7 +36,7 @@ router.post("/multi-agent/run", requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     (req as any).log?.error?.({ err }, "Multi-agent pipeline failed");
-    res.status(500).json({ error: "Pipeline execution failed: " + String(err) });
+    res.status(500).json({ error: "Pipeline execution failed" });
   }
 });
 

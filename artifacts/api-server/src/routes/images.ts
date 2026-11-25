@@ -269,9 +269,8 @@ router.post(
           // best-effort cleanup
         }
       }
-      const msg = err instanceof Error ? err.message : String(err);
       (req as any).log?.error({ err }, "attachment upload failed");
-      res.status(500).json({ error: "Attachment upload failed", detail: msg.slice(0, 200) });
+      res.status(500).json({ error: "Attachment upload failed" });
     }
   },
 );

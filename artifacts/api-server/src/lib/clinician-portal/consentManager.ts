@@ -25,6 +25,14 @@ export class ConsentManager {
     return saved.id;
   }
 
+  async getConsent(consentId: string) {
+    const [record] = await db.select()
+      .from(consentRecordsTable)
+      .where(eq(consentRecordsTable.id, consentId))
+      .limit(1);
+    return record || null;
+  }
+
   async revokeConsent(consentId: string): Promise<void> {
     await db.update(consentRecordsTable)
       .set({ status: "revoked", revokedAt: new Date() })

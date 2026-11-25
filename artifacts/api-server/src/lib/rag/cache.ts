@@ -9,13 +9,16 @@ export class RagCache {
     this.defaultTtlMs = defaultTtlMs;
   }
 
-  key(query: string, pipelineStage?: string): string {
+  key(query: string, pipelineStage?: string, scope?: string): string {
     const normalized = query.toLowerCase().replace(/\s+/g, " ").trim();
-    return pipelineStage ? `${pipelineStage}::${normalized}` : normalized;
+    const base = pipelineStage ? `${pipelineStage}::${normalized}` : normalized;
+    // Owner and filter scope are part of the key so a response retrieved for
+    // one account or document scope can never be served to another.
+    return scope ? `${base}::scope=${scope}` : base;
   }
 
-  get(query: string, pipelineStage?: string): RagResponse | undefined {
-    const k = this.key(query, pipelineStage);
+  get(query: string, pipelineStage?: string, scope?: string): RagResponse | undefined {
+    const k = this.key(query, pipelineStage, scope);
     const entry = this.cache.get(k);
     if (!entry) return undefined;
     if (entry.expiresAt < Date.now()) {
@@ -26,8 +29,8 @@ export class RagCache {
     return entry.data;
   }
 
-  set(query: string, data: RagResponse, pipelineStage?: string, ttlMs?: number): void {
-    const k = this.key(query, pipelineStage);
+  set(query: string, data: RagResponse, pipelineStage?: string, ttlMs?: number, scope?: string): void {
+    const k = this.key(query, pipelineStage, scope);
     this.cache.set(k, {
       key: k,
       data,

@@ -88,6 +88,14 @@ export class AlertCenterService {
     return saved.id;
   }
 
+  async getAlert(alertId: string) {
+    const [alert] = await db.select()
+      .from(alertCenterTable)
+      .where(eq(alertCenterTable.id, alertId))
+      .limit(1);
+    return alert || null;
+  }
+
   async markAsRead(alertId: string): Promise<void> {
     await db.update(alertCenterTable)
       .set({ isRead: true })

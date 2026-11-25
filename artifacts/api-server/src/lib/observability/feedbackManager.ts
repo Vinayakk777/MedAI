@@ -104,10 +104,24 @@ export class FeedbackManager {
     };
   }
 
-  async resolveFeedback(feedbackId: string): Promise<void> {
+  async resolveFeedback(feedbackId: string, userId: string): Promise<boolean> {
+    const [existing] = await db.select({ id: userFeedbackTable.id })
+      .from(userFeedbackTable)
+      .where(and(
+        eq(userFeedbackTable.id, feedbackId),
+        eq(userFeedbackTable.userId, userId),
+      ))
+      .limit(1);
+
+    if (!existing) return false;
+
     await db.update(userFeedbackTable)
       .set({ isResolved: true })
-      .where(eq(userFeedbackTable.id, feedbackId));
+      .where(and(
+        eq(userFeedbackTable.id, feedbackId),
+        eq(userFeedbackTable.userId, userId),
+      ));
+    return true;
   }
 
   private detectPatterns(freeText: string): string[] {

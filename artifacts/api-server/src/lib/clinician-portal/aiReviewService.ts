@@ -1,5 +1,5 @@
-import { db, aiConsultationReviewsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { db, aiConsultationReviewsTable, patientAssignmentsTable } from "@workspace/db";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import type { AIReviewInput, ClinicianReviewAction } from "./types";
 
 export class AIReviewService {
@@ -53,12 +53,25 @@ export class AIReviewService {
       .orderBy(desc(aiConsultationReviewsTable.createdAt));
   }
 
-  async getPendingReviews(clinicianId: string) {
+  async getPendingReviews(clinicianId: string, includeAllPatients = false) {
+    const conditions = [eq(aiConsultationReviewsTable.isReviewed, false)];
+
+    if (!includeAllPatients) {
+      const assignments = await db.select({ patientUserId: patientAssignmentsTable.patientUserId })
+        .from(patientAssignmentsTable)
+        .where(and(
+          eq(patientAssignmentsTable.clinicianId, clinicianId),
+          eq(patientAssignmentsTable.isActive, true),
+        ));
+
+      const patientUserIds = assignments.map((a) => a.patientUserId);
+      if (patientUserIds.length === 0) return [];
+      conditions.push(inArray(aiConsultationReviewsTable.patientUserId, patientUserIds));
+    }
+
     return db.select()
       .from(aiConsultationReviewsTable)
-      .where(and(
-        eq(aiConsultationReviewsTable.isReviewed, false),
-      ))
+      .where(and(...conditions))
       .orderBy(desc(aiConsultationReviewsTable.createdAt));
   }
 

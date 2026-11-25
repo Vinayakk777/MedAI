@@ -148,7 +148,8 @@ describe("GET /medical-documents", () => {
     const res = await request("/medical-documents");
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain("db unavailable");
+    expect(res.body).toEqual({ error: "Internal server error" });
+    expect(res.text).not.toContain("db unavailable");
   });
 });
 
@@ -287,6 +288,67 @@ describe("document sub-resources", () => {
   });
 });
 
+describe("GET /medical-documents/:id/summary", () => {
+  it("returns a stored summary only to the document owner", async () => {
+    seedDocument({ id: "doc-1" });
+    fake().seed("docClinicalSummaries", {
+      id: "summary-1",
+      userId: "user-a",
+      documentIds: ["doc-1"],
+      physicianSummary: "Owner summary",
+      patientSummary: "Owner patient summary",
+      keyFindings: ["finding"],
+      recommendations: ["recommendation"],
+      medicationSummary: { active: 0, changes: 0, issues: 0, details: "" },
+      createdAt: new Date("2025-01-02T00:00:00Z"),
+    });
+
+    const res = await request("/medical-documents/doc-1/summary");
+
+    expect(res.status).toBe(200);
+    expect(res.body.physicianSummary).toBe("Owner summary");
+    expect(fake().getRows("docClinicalSummaries")).toHaveLength(1);
+  });
+
+  it("does not expose another user's summary even when the document id matches a summary id", async () => {
+    seedDocument({ id: "doc-b", userId: "user-b" });
+    fake().seed("docClinicalSummaries", {
+      id: "doc-b",
+      userId: "user-b",
+      documentIds: ["doc-b"],
+      physicianSummary: "Private summary",
+      patientSummary: "Private patient summary",
+      createdAt: new Date("2025-01-02T00:00:00Z"),
+    });
+
+    const res = await request("/medical-documents/doc-b/summary");
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Not found" });
+    expect(res.text).not.toContain("Private summary");
+  });
+
+  it("does not generate a summary for another user's document", async () => {
+    seedDocument({ id: "doc-b", userId: "user-b" });
+
+    const res = await request("/medical-documents/doc-b/summary");
+
+    expect(res.status).toBe(404);
+    expect(fake().getRows("docClinicalSummaries")).toHaveLength(0);
+  });
+
+  it("generates a summary scoped to the requesting owner", async () => {
+    seedDocument({ id: "doc-1" });
+
+    const res = await request("/medical-documents/doc-1/summary");
+
+    expect(res.status).toBe(200);
+    const summaries = fake().getRows("docClinicalSummaries");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ userId: "user-a", documentIds: ["doc-1"] });
+  });
+});
+
 describe("GET /medical-documents/timeline/events", () => {
   it("returns timeline events for the current user", async () => {
     seedDocument({
@@ -311,12 +373,7 @@ describe("GET /medical-documents/timeline/events", () => {
 });
 
 describe("GET /medical-documents/stats/summary", () => {
-  // Characterisation test: the stats route is declared after
-  // `/medical-documents/:id/summary`, so Express matches this URL as
-  // `id = "stats"` and the summary handler returns 404. The stats endpoint is
-  // therefore currently unreachable over HTTP. Recorded here instead of
-  // silently changing production routing.
-  it("is shadowed by /:id/summary and returns 404 (characterisation)", async () => {
+  it("scopes document and lab counts to the requesting user", async () => {
     seedDocument({ id: "a", documentType: "lab_report", status: "uploaded", fileSize: 100 });
     seedDocument({
       id: "b",
@@ -324,11 +381,26 @@ describe("GET /medical-documents/stats/summary", () => {
       status: "analyzed",
       fileSize: 250,
     });
+    seedDocument({
+      id: "other",
+      userId: "user-b",
+      documentType: "lab_report",
+      status: "uploaded",
+      fileSize: 999,
+    });
     fake().seed("docLabValues", { documentId: "a", isAbnormal: true });
+    fake().seed("docLabValues", { documentId: "a", isAbnormal: false });
+    fake().seed("docLabValues", { documentId: "other", isAbnormal: true });
 
     const res = await request("/medical-documents/stats/summary");
 
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "Not found" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      totalDocuments: 2,
+      totalSize: 350,
+      abnormalLabCount: 1,
+      totalLabCount: 2,
+    });
+    expect(res.body.byType).toEqual({ lab_report: 1, prescription: 1 });
   });
 });

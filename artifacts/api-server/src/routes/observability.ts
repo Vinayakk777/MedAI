@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 import { requireAdmin } from "../middlewares/requireAdmin";
-import { db, userFeedbackTable, consultationAnalyticsTable, aiQualityMetricsTable, providerCallLogsTable, promptVersionsTable, evaluationRunsTable, evaluationResultsTable, alertConfigsTable, alertEventsTable, auditLogsTable, anonymizedEventsTable } from "@workspace/db";
+import { db, userFeedbackTable, consultationAnalyticsTable, aiQualityMetricsTable, providerCallLogsTable, promptVersionsTable, evaluationRunsTable, evaluationResultsTable, alertConfigsTable, alertEventsTable, auditLogsTable, anonymizedEventsTable, clinicianProfilesTable } from "@workspace/db";
 import { eq, and, desc, gte, lte, count, sql } from "drizzle-orm";
 import { AnalyticsCollector } from "../lib/observability/analyticsCollector";
 import { FeedbackManager } from "../lib/observability/feedbackManager";
@@ -22,26 +22,49 @@ const prompts = new PromptManager();
 const alerts = new AlertManager();
 const audit = new AuditLogger();
 
+async function isAdminUser(userId: string): Promise<boolean> {
+  const [profile] = await db.select({ role: clinicianProfilesTable.role })
+    .from(clinicianProfilesTable)
+    .where(and(
+      eq(clinicianProfilesTable.userId, userId),
+      eq(clinicianProfilesTable.isActive, true),
+    ))
+    .limit(1);
+  return profile?.role === "admin";
+}
+
+/**
+ * Global aggregates span every account. Only administrators may request them;
+ * an ordinary authenticated user can still read their own scoped stats.
+ */
+async function adminOnlyForGlobal(req: any, res: any, next: any) {
+  if (req.query.global === "true") {
+    await requireAdmin(req, res, next);
+    return;
+  }
+  next();
+}
+
 // ─────────────────────────────────────────────
 //  ANALYTICS
 // ─────────────────────────────────────────────
 
-router.get("/observability/analytics/stats", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/analytics/stats", requireAuth, adminOnlyForGlobal, async (req: AuthRequest, res) => {
   try {
     const stats = await analytics.getAggregatedStats(req.query.global === "true" ? undefined : req.userId);
     res.json(stats);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-router.get("/observability/analytics/trends", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/analytics/trends", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const days = parseInt(req.query.days as string) || 30;
     const trends = await analytics.getUsageTrends(days);
     res.json(trends);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -52,7 +75,7 @@ router.get("/observability/analytics/consultations", requireAuth, async (req: Au
     const records = await analytics.getUserAnalytics(req.userId, limit, offset);
     res.json(records);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -60,9 +83,13 @@ router.get("/observability/analytics/consultations/:conversationId", requireAuth
   try {
     const record = await analytics.getConsultationAnalytics(req.params.conversationId as string);
     if (!record) { res.status(404).json({ error: "Not found" }); return; }
+    if (record.userId !== req.userId && !(await isAdminUser(req.userId))) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
     res.json(record);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -75,7 +102,7 @@ router.post("/observability/feedback", requireAuth, async (req: AuthRequest, res
     const id = await feedback.submitFeedback(req.userId, req.body);
     res.json({ id, message: "Feedback submitted" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -86,25 +113,26 @@ router.get("/observability/feedback", requireAuth, async (req: AuthRequest, res)
     const records = await feedback.getFeedback(req.userId, limit, offset);
     res.json(records);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-router.get("/observability/feedback/summary", requireAuth, async (req: AuthRequest, res) => {
+router.get("/observability/feedback/summary", requireAuth, requireAdmin, async (_req: AuthRequest, res) => {
   try {
     const summary = await feedback.getFeedbackSummary();
     res.json(summary);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 router.put("/observability/feedback/:id/resolve", requireAuth, async (req: AuthRequest, res) => {
   try {
-    await feedback.resolveFeedback(req.params.id as string);
+    const resolved = await feedback.resolveFeedback(req.params.id as string, req.userId);
+    if (!resolved) { res.status(404).json({ error: "Not found" }); return; }
     res.json({ message: "Feedback resolved" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -117,7 +145,7 @@ router.get("/observability/quality/dashboard", requireAdmin, async (_req, res) =
     const metrics = await quality.getDashboardMetrics();
     res.json(metrics);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -128,7 +156,7 @@ router.get("/observability/quality/history", requireAdmin, async (req: AuthReque
     const history = await quality.getMetricsHistory(resolution, days);
     res.json(history);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -141,7 +169,7 @@ router.get("/observability/providers/comparison", requireAdmin, async (_req, res
     const comparison = await providers.getProviderComparison();
     res.json(comparison);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -152,7 +180,7 @@ router.get("/observability/providers/logs", requireAdmin, async (req: AuthReques
     const logs = await providers.getProviderCallLogs(limit, offset);
     res.json(logs);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -162,7 +190,7 @@ router.get("/observability/providers/recommended", requireAuth, async (req: Auth
     const recommended = await providers.getRecommendedProvider(taskType);
     res.json(recommended || { provider: "groq", model: "openai/gpt-oss-120b" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -183,7 +211,7 @@ router.get("/observability/prompts", requireAdmin, async (req: AuthRequest, res)
     const history = await prompts.getVersionHistory(name);
     res.json(history);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -194,7 +222,7 @@ router.get("/observability/prompts/active", requireAdmin, async (req: AuthReques
     const version = await prompts.getActiveVersion(name);
     res.json(version);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -207,7 +235,7 @@ router.post("/observability/prompts", requireAdmin, async (req: AuthRequest, res
     await audit.log({ userId: req.userId, action: "prompt_created", resourceType: "prompt_version", resourceId: result.id });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -217,7 +245,7 @@ router.post("/observability/prompts/:id/activate", requireAdmin, async (req: Aut
     await audit.log({ userId: req.userId, action: "prompt_activated", resourceType: "prompt_version", resourceId: req.params.id as string });
     res.json({ message: "Version activated" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -228,7 +256,7 @@ router.post("/observability/prompts/rollback", requireAdmin, async (req: AuthReq
     await audit.log({ userId: req.userId, action: "prompt_rolled_back", resourceType: "prompt_version", resourceId: name });
     res.json({ message: `Rolled back to version ${targetVersion}` });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -238,7 +266,7 @@ router.get("/observability/prompts/compare", requireAdmin, async (req: AuthReque
     const diff = await prompts.compareVersions(a, b);
     res.json(diff);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -267,7 +295,7 @@ router.post("/observability/evaluations/run", requireAdmin, async (req: AuthRequ
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -277,7 +305,7 @@ router.get("/observability/evaluations/runs", requireAdmin, async (_req, res) =>
     const runs = await pipeline.getRunHistory();
     res.json(runs);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -288,7 +316,7 @@ router.get("/observability/evaluations/runs/:id", requireAdmin, async (req: Auth
     if (!detail) { res.status(404).json({ error: "Not found" }); return; }
     res.json(detail);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -299,7 +327,7 @@ router.get("/observability/evaluations/compare", requireAdmin, async (req: AuthR
     const comparison = await pipeline.compareRuns(a, b);
     res.json(comparison);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -312,7 +340,7 @@ router.get("/observability/alerts/configs", requireAdmin, async (_req, res) => {
     const configs = await alerts.getConfigs();
     res.json(configs);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -322,7 +350,7 @@ router.post("/observability/alerts/configs", requireAdmin, async (req: AuthReque
     await audit.log({ userId: req.userId, action: "alert_modified", resourceType: "alert_config", resourceId: id });
     res.json({ id });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -331,7 +359,7 @@ router.put("/observability/alerts/configs/:id", requireAdmin, async (req: AuthRe
     await alerts.updateConfig(req.params.id as string, req.body);
     res.json({ message: "Config updated" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -340,7 +368,7 @@ router.delete("/observability/alerts/configs/:id", requireAdmin, async (req: Aut
     await alerts.deleteConfig(req.params.id as string);
     res.json({ message: "Config deleted" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -352,7 +380,7 @@ router.get("/observability/alerts/history", requireAdmin, async (req: AuthReques
     const history = await alerts.getAlertHistory(limit, offset, severity);
     res.json(history);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -361,7 +389,7 @@ router.put("/observability/alerts/:id/resolve", requireAdmin, async (req: AuthRe
     await alerts.resolveAlert(req.params.id as string);
     res.json({ message: "Alert resolved" });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -378,7 +406,7 @@ router.get("/observability/admin/audit-logs", requireAdmin, async (req: AuthRequ
     const logs = await audit.getAuditLogs(limit, offset, resourceType, action);
     res.json(logs);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -387,7 +415,7 @@ router.get("/observability/admin/audit-summary", requireAdmin, async (_req, res)
     const summary = await audit.getAuditSummary();
     res.json(summary);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -435,7 +463,7 @@ router.get("/observability/admin/dashboard", requireAdmin, async (_req, res) => 
       providerDistribution: analyticsStats.providerDistribution,
     });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

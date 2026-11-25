@@ -33,7 +33,7 @@ router.get("/safety-admin/guardrails", requireAdmin, async (_req, res) => {
       })),
     });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -61,7 +61,7 @@ router.post("/safety-admin/guardrails", requireAdmin, async (req: AdminRequest, 
 
     res.json({ message: "Guardrail updated", guardrail });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -117,7 +117,7 @@ router.post("/safety-admin/regression/run", requireAdmin, async (req: AdminReque
 
     res.json(report);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -134,7 +134,7 @@ router.get("/safety-admin/regression/runs", requireAdmin, async (_req, res) => {
 
     res.json(runs);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -154,7 +154,7 @@ router.get("/safety-admin/regression/runs/:id", requireAdmin, async (req: AdminR
 
     res.json(run);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -175,7 +175,7 @@ router.get("/safety-admin/regression/scenarios", requireAdmin, async (_req, res)
       expectedChecks: s.expectedChecks.length,
     })));
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -240,7 +240,7 @@ router.get("/safety-admin/stats", requireAdmin, async (_req, res) => {
       violationsByCategory,
     });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

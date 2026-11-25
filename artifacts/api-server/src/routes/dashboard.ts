@@ -290,7 +290,7 @@ router.post("/dashboard/providers/:name/connect", requireAuth, (req, res) => {
     res.json({ url: provider.connectUrl(redirectUri ?? "http://localhost:3000/callback") });
   } catch (err) {
     (req as any).log.error({ err }, "provider connect failed");
-    res.status(400).json({ error: err instanceof Error ? err.message : "Failed to build connect URL" });
+    res.status(400).json({ error: "Failed to build connect URL" });
   }
 });
 

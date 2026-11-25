@@ -19,7 +19,7 @@ router.get("/rag-admin/health", requireAdmin, async (_req, res) => {
     await engine.ensureSetup();
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   } catch (err) {
-    res.status(500).json({ status: "error", error: String(err) });
+    res.status(500).json({ status: "error", error: "Internal server error" });
   }
 });
 
@@ -168,7 +168,7 @@ router.post("/rag-admin/ingest", requireAdmin, async (req, res) => {
     res.json(result);
   } catch (err) {
     (req as any).log?.error?.({ err }, "Document ingestion failed");
-    res.status(500).json({ error: "Ingestion failed: " + String(err) });
+    res.status(500).json({ error: "Ingestion failed" });
   }
 });
 

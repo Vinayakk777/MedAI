@@ -210,6 +210,11 @@ export function createFakeDb(): FakeDb {
         orderBy = args.length === 1 ? args[0] : args;
         return query;
       },
+      groupBy() {
+        // Grouping is not modelled; the aggregate projections already return
+        // one row for the filtered set.
+        return query;
+      },
       limit(count: number) {
         limitCount = count;
         return query;

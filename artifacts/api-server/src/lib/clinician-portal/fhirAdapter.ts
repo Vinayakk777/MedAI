@@ -1,5 +1,5 @@
 import { db, fhirMappingsTable, fhirExportQueueTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import type { FHIRResourceType, FHIRMappingConfig, FHIRResource } from "./types";
 
 export interface FHIRAdapter {
@@ -119,9 +119,16 @@ export class FHIRService {
     return queueEntry[0].id;
   }
 
-  async getExportQueue(patientUserId?: string, status?: string) {
+  async getExportQueue(
+    patientUserId?: string,
+    status?: string,
+    allowedPatientUserIds?: string[],
+  ) {
     const conditions = [];
     if (patientUserId) conditions.push(eq(fhirExportQueueTable.patientUserId, patientUserId));
+    if (allowedPatientUserIds) {
+      conditions.push(inArray(fhirExportQueueTable.patientUserId, allowedPatientUserIds));
+    }
     if (status) conditions.push(eq(fhirExportQueueTable.status, status));
 
     return db.select()

@@ -1,5 +1,5 @@
 import { db, docClinicalSummariesTable, docUploadsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { ClinicalSummary } from "./types";
 
 export class ClinicalSummarizer {
@@ -7,7 +7,10 @@ export class ClinicalSummarizer {
     userId: string, documentIds: string[], conversationHistory?: string
   ): Promise<ClinicalSummary> {
     const docs = await db.select().from(docUploadsTable)
-      .where(inArray(docUploadsTable.id, documentIds));
+      .where(and(
+        inArray(docUploadsTable.id, documentIds),
+        eq(docUploadsTable.userId, userId),
+      ));
 
     const findings: string[] = [];
     const recommendations: string[] = [];
@@ -102,12 +105,18 @@ export class ClinicalSummarizer {
     return parts.join("\n\n");
   }
 
-  async getSummary(documentId: string): Promise<ClinicalSummary | null> {
+  async getSummary(userId: string, documentId: string): Promise<ClinicalSummary | null> {
+    // Summaries are keyed by the document ids they cover, not by their own
+    // primary key. Scope the lookup to the requesting user so a document id
+    // from another account can never resolve to a stored summary.
     const rows = await db.select().from(docClinicalSummariesTable)
-      .where(eq(docClinicalSummariesTable.id, documentId))
-      .limit(1);
-    if (rows.length === 0) return null;
-    const r = rows[0];
+      .where(eq(docClinicalSummariesTable.userId, userId))
+      .orderBy(desc(docClinicalSummariesTable.createdAt))
+      .limit(50);
+    const r = rows.find((row) =>
+      Array.isArray(row.documentIds) && row.documentIds.includes(documentId),
+    );
+    if (!r) return null;
     return {
       physicianSummary: r.physicianSummary || "",
       patientSummary: r.patientSummary || "",

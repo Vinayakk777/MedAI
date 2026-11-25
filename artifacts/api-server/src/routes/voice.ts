@@ -20,7 +20,7 @@ router.post("/voice/sessions", requireAuth, async (req: AuthRequest, res) => {
     }).returning();
     res.json(saved);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -32,7 +32,7 @@ router.get("/voice/sessions", requireAuth, async (req: AuthRequest, res) => {
       .limit(20);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -43,7 +43,7 @@ router.get("/voice/sessions/:id", requireAuth, async (req: AuthRequest, res) => 
     if (!session || session.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     res.json(session);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -55,7 +55,7 @@ router.patch("/voice/sessions/:id/end", requireAuth, async (req: AuthRequest, re
     await voiceEngine.endSession(id);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -109,7 +109,7 @@ router.get("/voice/history", requireAuth, async (req: AuthRequest, res) => {
       .limit(limit).offset(offset);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -121,7 +121,7 @@ router.get("/voice/history/:id", requireAuth, async (req: AuthRequest, res) => {
     const transcripts = await voiceEngine.getTranscripts(id);
     res.json({ session, transcripts });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

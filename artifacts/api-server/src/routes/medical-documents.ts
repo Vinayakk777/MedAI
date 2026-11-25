@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request } from "express";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 import { DocumentManager } from "../lib/medical-documents/documentManager";
 import { db, docUploadsTable, docLabValuesTable } from "@workspace/db";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import multer from "multer";
 import { randomUUID } from "crypto";
 import { ensureDir, safeExtension, userDocumentsDir } from "../lib/storage/paths";
@@ -53,7 +53,7 @@ router.post("/medical-documents/upload", requireAuth, upload.single("file"), asy
     });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -74,7 +74,7 @@ router.get("/medical-documents", requireAuth, async (req: AuthRequest, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -85,7 +85,7 @@ router.get("/medical-documents/:id", requireAuth, async (req: AuthRequest, res) 
     if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
     res.json(doc);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -97,7 +97,7 @@ router.delete("/medical-documents/:id", requireAuth, async (req: AuthRequest, re
     await docManager.softDelete(id);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -109,7 +109,7 @@ router.patch("/medical-documents/:id/archive", requireAuth, async (req: AuthRequ
     await docManager.archive(id, req.body.archived !== false);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -121,7 +121,7 @@ router.patch("/medical-documents/:id/tags", requireAuth, async (req: AuthRequest
     await docManager.updateTags(id, req.body.tags || []);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -170,7 +170,7 @@ router.post("/medical-documents/:id/process", requireAuth, async (req: AuthReque
   } catch (err) {
     const id = req.params.id as string;
     await docManager.updateStatus(id, "failed");
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -236,32 +236,8 @@ router.get("/medical-documents/:id/trends", requireAuth, async (req: AuthRequest
   }
 });
 
-router.get("/medical-documents/:id/summary", requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const id = req.params.id as string;
-    const summary = await docManager.clinicalSummarizer.getSummary(id);
-    if (!summary) {
-      const doc = await docManager.getById(id);
-      if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
-      const generated = await docManager.clinicalSummarizer.generateSummary(req.userId, [id]);
-      res.json(generated);
-      return;
-    }
-    res.json(summary);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-router.get("/medical-documents/timeline/events", requireAuth, async (req: AuthRequest, res) => {
-  try {
-    const events = await docManager.getTimelineEvents(req.userId, parseInt(req.query.limit as string) || 50);
-    res.json(events);
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
+// Declared before `/medical-documents/:id/summary` so the literal `stats`
+// segment is not captured as a document id.
 router.get("/medical-documents/stats/summary", requireAuth, async (req: AuthRequest, res) => {
   try {
     const all = await db.select().from(docUploadsTable)
@@ -277,23 +253,66 @@ router.get("/medical-documents/stats/summary", requireAuth, async (req: AuthRequ
       totalSize += d.fileSize || 0;
     }
 
-    const [abnormalResult] = await db.select({ count: sql<number>`count(*)` })
-      .from(docLabValuesTable)
-      .where(eq(docLabValuesTable.isAbnormal, true));
+    // Lab counts are scoped through the user's own documents. Without this
+    // filter the endpoint would report aggregate counts across every account.
+    const documentIds = all.map((d) => d.id);
+    let abnormalLabCount = 0;
+    let totalLabCount = 0;
+    if (documentIds.length > 0) {
+      const [abnormalResult] = await db.select({ count: sql<number>`count(*)` })
+        .from(docLabValuesTable)
+        .where(and(
+          inArray(docLabValuesTable.documentId, documentIds),
+          eq(docLabValuesTable.isAbnormal, true),
+        ));
 
-    const [totalResult] = await db.select({ count: sql<number>`count(*)` })
-      .from(docLabValuesTable);
+      const [totalResult] = await db.select({ count: sql<number>`count(*)` })
+        .from(docLabValuesTable)
+        .where(inArray(docLabValuesTable.documentId, documentIds));
+
+      abnormalLabCount = Number(abnormalResult?.count || 0);
+      totalLabCount = Number(totalResult?.count || 0);
+    }
 
     res.json({
       totalDocuments: all.length,
       totalSize,
       byType: typeCount,
       byStatus: statusCount,
-      abnormalLabCount: Number(abnormalResult?.count || 0),
-      totalLabCount: Number(totalResult?.count || 0),
+      abnormalLabCount,
+      totalLabCount,
     });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: "Failed to get document statistics" });
+  }
+});
+
+router.get("/medical-documents/:id/summary", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+
+    // Ownership must be established before any summary lookup or generation.
+    const doc = await docManager.getById(id);
+    if (!doc || doc.userId !== req.userId) { res.status(404).json({ error: "Not found" }); return; }
+
+    const summary = await docManager.clinicalSummarizer.getSummary(req.userId, id);
+    if (!summary) {
+      const generated = await docManager.clinicalSummarizer.generateSummary(req.userId, [id]);
+      res.json(generated);
+      return;
+    }
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get document summary" });
+  }
+});
+
+router.get("/medical-documents/timeline/events", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const events = await docManager.getTimelineEvents(req.userId, parseInt(req.query.limit as string) || 50);
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get timeline events" });
   }
 });
 

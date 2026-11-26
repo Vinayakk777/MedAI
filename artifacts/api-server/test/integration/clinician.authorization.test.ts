@@ -428,3 +428,176 @@ describe("clinician admin bypass", () => {
     expect(res.body).toMatchObject({ id: "note-b" });
   });
 });
+
+describe("clinician patient assignment administration", () => {
+  function assignmentsFor(clinicianId: string, patientUserId: string) {
+    return fake().getRows("patientAssignments").filter(
+      (row) => row.clinicianId === clinicianId && row.patientUserId === patientUserId,
+    );
+  }
+
+  it("denies a clinician self-assigning to an unassigned patient", async () => {
+    const res = await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", { clinicianId: CLINICIAN_ID, patientUserId: "patient-new" }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(assignmentsFor(CLINICIAN_ID, "patient-new")).toHaveLength(0);
+    expect(fake().getRows("patientAssignments")).toHaveLength(1);
+  });
+
+  it("denies a clinician assigning another clinician", async () => {
+    seedClinician("clinician-c", "clin-c");
+
+    const res = await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", { clinicianId: "clin-c", patientUserId: "patient-new" }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(assignmentsFor("clin-c", "patient-new")).toHaveLength(0);
+    expect(fake().getRows("patientAssignments")).toHaveLength(1);
+  });
+
+  it("denies a clinician changing an existing assignment", async () => {
+    const res = await request(
+      "/clinician/patients/unassign",
+      jsonRequest("POST", { clinicianId: CLINICIAN_ID, patientUserId: "patient-a" }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(fake().getRows("patientAssignments")[0].isActive).toBe(true);
+  });
+
+  it("allows an admin to assign a clinician to a patient", async () => {
+    auth.userId = "admin-user";
+    seedClinician("admin-user", "admin-profile", "admin");
+    seedClinician("clinician-c", "clin-c");
+
+    const res = await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", {
+        clinicianId: "clin-c",
+        patientUserId: "patient-new",
+        relationship: "consulting",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(assignmentsFor("clin-c", "patient-new")).toEqual([
+      expect.objectContaining({ isActive: true, relationship: "consulting" }),
+    ]);
+
+    // The audit entry records the admin as the actor, not the target clinician.
+    expect(
+      fake().getRows("clinicianAuditLogs").find((row) => row.action === "assign_patient"),
+    ).toMatchObject({
+      clinicianId: "admin-profile",
+      patientUserId: "patient-new",
+      resourceType: "patient_assignment",
+    });
+  });
+
+  it("rejects assignment to an unknown or inactive clinician", async () => {
+    auth.userId = "admin-user";
+    seedClinician("admin-user", "admin-profile", "admin");
+    fake().seed("clinicianProfiles", {
+      id: "clin-inactive",
+      userId: "clinician-inactive",
+      role: "doctor",
+      fullName: "Inactive Clinician",
+      isActive: false,
+    });
+
+    const unknown = await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", { clinicianId: "clin-missing", patientUserId: "patient-new" }),
+    );
+    const inactive = await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", { clinicianId: "clin-inactive", patientUserId: "patient-new" }),
+    );
+
+    expect(unknown.status).toBe(404);
+    expect(inactive.status).toBe(404);
+    expect(assignmentsFor("clin-inactive", "patient-new")).toHaveLength(0);
+    expect(fake().getRows("patientAssignments")).toHaveLength(1);
+  });
+
+  it("keeps an unassigned clinician denied after another clinician is assigned", async () => {
+    auth.userId = "admin-user";
+    seedClinician("admin-user", "admin-profile", "admin");
+    seedClinician("clinician-c", "clin-c");
+
+    const assigned = await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", { clinicianId: "clin-c", patientUserId: "patient-new" }),
+    );
+    expect(assigned.status).toBe(200);
+
+    // Back to the original clinician, who is not assigned to patient-new.
+    auth.userId = "clinician-user";
+
+    const record = await request("/clinician/patients/patient-new/record");
+    const notes = await request("/clinician/notes/patient/patient-new");
+    const tasks = await request("/clinician/tasks/patient/patient-new");
+
+    expect(record.status).toBe(403);
+    expect(notes.status).toBe(403);
+    expect(tasks.status).toBe(403);
+  });
+
+  it("allows the newly assigned clinician to read that patient's record", async () => {
+    auth.userId = "admin-user";
+    seedClinician("admin-user", "admin-profile", "admin");
+    seedClinician("clinician-c", "clin-c");
+
+    await request(
+      "/clinician/patients/assign",
+      jsonRequest("POST", { clinicianId: "clin-c", patientUserId: "patient-new" }),
+    );
+
+    auth.userId = "clinician-c";
+    const record = await request("/clinician/patients/patient-new/record");
+
+    expect(record.status).toBe(200);
+    expect(record.body).toMatchObject({ physicianNotes: [], carePlans: [], referrals: [] });
+  });
+
+  it("still allows the existing assigned clinician to access their own patient", async () => {
+    const record = await request("/clinician/patients/patient-a/record");
+    const notes = await request("/clinician/notes/patient/patient-a");
+    const carePlans = await request("/clinician/care-plans/patient/patient-a");
+
+    expect(record.status).toBe(200);
+    expect(notes.status).toBe(200);
+    expect(carePlans.status).toBe(200);
+  });
+
+  it("still denies access to an unrelated patient", async () => {
+    const record = await request("/clinician/patients/patient-b/record");
+    const notes = await request("/clinician/notes/patient/patient-b");
+
+    expect(record.status).toBe(403);
+    expect(notes.status).toBe(403);
+  });
+
+  it("allows an admin to unassign a clinician and removes access", async () => {
+    auth.userId = "admin-user";
+    seedClinician("admin-user", "admin-profile", "admin");
+
+    const res = await request(
+      "/clinician/patients/unassign",
+      jsonRequest("POST", { clinicianId: CLINICIAN_ID, patientUserId: "patient-a" }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(fake().getRows("patientAssignments")[0].isActive).toBe(false);
+
+    auth.userId = "clinician-user";
+    const record = await request("/clinician/patients/patient-a/record");
+
+    expect(record.status).toBe(403);
+  });
+});

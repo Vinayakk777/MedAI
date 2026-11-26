@@ -142,6 +142,9 @@ export function createFakeDb(): FakeDb {
     if (table === "docUploads") {
       if (row.isArchived === undefined) row.isArchived = false;
     }
+    if (table === "patientAssignments" && row.isActive === undefined) {
+      row.isActive = true;
+    }
     return row;
   };
 

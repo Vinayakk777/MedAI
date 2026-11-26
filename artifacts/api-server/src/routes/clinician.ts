@@ -166,23 +166,76 @@ router.get("/clinician/patients", requireAuth, requireClinician, async (req: any
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
-router.post("/clinician/patients/assign", requireAuth, requireClinician, requireRole("doctor", "admin"), async (req: any, res) => {
+/**
+ * Assignment changes are administrative. A clinician must never be able to
+ * grant themselves (or a colleague) access by supplying a patient id, so both
+ * assign and unassign require an active admin profile and an explicit target
+ * clinician. The target is validated against active clinician profiles.
+ */
+router.post("/clinician/patients/assign", requireAuth, requireClinician, requireRole("admin"), async (req: any, res) => {
   try {
+    const { clinicianId, patientUserId, relationship, notes } = req.body ?? {};
+
+    if (typeof clinicianId !== "string" || clinicianId.trim() === "") {
+      res.status(400).json({ error: "clinicianId is required" });
+      return;
+    }
+    if (typeof patientUserId !== "string" || patientUserId.trim() === "") {
+      res.status(400).json({ error: "patientUserId is required" });
+      return;
+    }
+
+    const targetClinician = await clinicianService.getProfileById(clinicianId);
+    if (!targetClinician || !targetClinician.isActive) {
+      res.status(404).json({ error: "Clinician not found" });
+      return;
+    }
+
     const id = await clinicianService.assignPatient({
-      clinicianId: req.clinicianProfile.id,
-      patientUserId: req.body.patientUserId,
-      relationship: req.body.relationship || "primary_care",
-      notes: req.body.notes,
+      clinicianId,
+      patientUserId,
+      relationship: relationship || "primary_care",
+      notes,
     });
-    await auditService.record({ clinicianId: req.clinicianProfile.id, patientUserId: req.body.patientUserId, action: "assign_patient", resourceType: "patient_assignment", resourceId: id });
+    await auditService.record({
+      clinicianId: req.clinicianProfile.id,
+      patientUserId,
+      action: "assign_patient",
+      resourceType: "patient_assignment",
+      resourceId: id,
+      details: { assignedClinicianId: clinicianId, relationship: relationship || "primary_care" },
+    });
     res.json({ id });
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
 
-router.post("/clinician/patients/unassign", requireAuth, requireClinician, requireRole("doctor", "admin"), async (req: any, res) => {
+router.post("/clinician/patients/unassign", requireAuth, requireClinician, requireRole("admin"), async (req: any, res) => {
   try {
-    await clinicianService.unassignPatient(req.clinicianProfile.id, req.body.patientUserId);
-    await auditService.record({ clinicianId: req.clinicianProfile.id, patientUserId: req.body.patientUserId, action: "unassign_patient", resourceType: "patient_assignment" });
+    const { clinicianId, patientUserId } = req.body ?? {};
+
+    if (typeof clinicianId !== "string" || clinicianId.trim() === "") {
+      res.status(400).json({ error: "clinicianId is required" });
+      return;
+    }
+    if (typeof patientUserId !== "string" || patientUserId.trim() === "") {
+      res.status(400).json({ error: "patientUserId is required" });
+      return;
+    }
+
+    const targetClinician = await clinicianService.getProfileById(clinicianId);
+    if (!targetClinician) {
+      res.status(404).json({ error: "Clinician not found" });
+      return;
+    }
+
+    await clinicianService.unassignPatient(clinicianId, patientUserId);
+    await auditService.record({
+      clinicianId: req.clinicianProfile.id,
+      patientUserId,
+      action: "unassign_patient",
+      resourceType: "patient_assignment",
+      details: { unassignedClinicianId: clinicianId },
+    });
     res.json({ message: "Patient unassigned" });
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });

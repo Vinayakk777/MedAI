@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -14,9 +14,20 @@ import {
   ImageIcon,
   FileText,
   RotateCcw,
+  Loader2,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { MarkdownContent } from "./MarkdownContent";
+import { AnswerStatusNotice } from "./AnswerStatusNotice";
 import { useSpeechSynthesis } from "@/hooks/use-speech-synthesis";
+import { EvidencePanel } from "@/components/rag/EvidencePanel";
+import { parseCitationFooter } from "@/lib/citations";
+import { classifyAnswer } from "@/lib/answerState";
+import {
+  getAttachmentStateView,
+  type AttachmentTone,
+} from "@/lib/attachmentState";
 
 export type Attachment = {
   id: string;
@@ -28,6 +39,8 @@ export type Attachment = {
   height?: number;
   type?: "image" | "document";
   pageCount?: number;
+  extractionStatus?: string;
+  extractionError?: string | null;
 };
 
 export type Message = {
@@ -43,10 +56,47 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const attachmentToneClass: Record<AttachmentTone, string> = {
+  neutral: "border-white/10 bg-white/5 text-muted-foreground/60",
+  info: "border-cyan-500/20 bg-cyan-500/10 text-cyan-300",
+  success: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+  warning: "border-amber-500/20 bg-amber-500/10 text-amber-300",
+  danger: "border-rose-500/20 bg-rose-500/10 text-rose-300",
+};
+
+function AttachmentStatusBadge({ attachment }: { attachment: Attachment }) {
+  const view = getAttachmentStateView(attachment);
+  const Icon =
+    view.state === "ready"
+      ? Check
+      : view.state === "uploading" || view.state === "processing"
+        ? Loader2
+        : view.state === "partial"
+          ? Info
+          : AlertTriangle;
+  const spinning = view.state === "uploading" || view.state === "processing";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[8px] font-medium ${attachmentToneClass[view.tone]}`}
+      title={view.description}
+      aria-label={`${attachment.name}: ${view.label}. ${view.description}`}
+    >
+      <Icon className={`w-2.5 h-2.5 ${spinning ? "animate-spin" : ""}`} />
+      {view.label}
+    </span>
+  );
+}
+
 interface ChatMessageProps {
   message: Message;
   isLatest?: boolean;
   onRetry?: () => void;
+  /**
+   * Attachments from the nearest preceding user message. Used only to resolve
+   * the URL of an attachment citation; the backend still enforces ownership.
+   */
+  evidenceAttachments?: Attachment[];
 }
 
 function SpeakingEqualizer() {
@@ -64,12 +114,38 @@ function SpeakingEqualizer() {
   );
 }
 
-export function ChatMessage({ message, isLatest, onRetry }: ChatMessageProps) {
+export function ChatMessage({ message, isLatest, onRetry, evidenceAttachments }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const speech = useSpeechSynthesis();
   const isUser = message.role === "user";
   const isSpeakingThis = speech.speakingId === message.id;
+
+  const parsedCitations = useMemo(
+    () =>
+      !isUser && !message.isError
+        ? parseCitationFooter(message.content, evidenceAttachments ?? [])
+        : null,
+    [isUser, message.isError, message.content, evidenceAttachments],
+  );
+
+  const answerKind = useMemo(
+    () =>
+      isUser
+        ? "answered"
+        : classifyAnswer(message.content, {
+            isError: message.isError,
+            citationCount: parsedCitations?.sources.length ?? 0,
+          }),
+    [isUser, message.content, message.isError, parsedCitations],
+  );
+
+  const showEvidencePanel =
+    !isUser &&
+    !message.isError &&
+    answerKind !== "emergency" &&
+    answerKind !== "safety_fallback" &&
+    answerKind !== "insufficient";
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -151,26 +227,31 @@ export function ChatMessage({ message, isLatest, onRetry }: ChatMessageProps) {
                           <span className="block text-[9px] opacity-70">
                             PDF{att.pageCount ? ` · ${att.pageCount} page${att.pageCount === 1 ? "" : "s"}` : ""}
                           </span>
+                          <span className="mt-1 inline-flex">
+                            <AttachmentStatusBadge attachment={att} />
+                          </span>
                         </span>
                       </a>
                     );
                   }
                   return (
-                    <a
-                      key={att.id}
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`View attached image ${att.name}`}
-                      className="block"
-                    >
-                      <img
-                        src={att.url}
-                        alt={att.name}
-                        loading="lazy"
-                        className="w-24 h-24 rounded-lg object-cover border border-white/20 shadow-md hover:opacity-90 transition-opacity"
-                      />
-                    </a>
+                    <div key={att.id} className="flex flex-col items-start gap-1">
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`View attached image ${att.name}`}
+                        className="block"
+                      >
+                        <img
+                          src={att.url}
+                          alt={att.name}
+                          loading="lazy"
+                          className="w-24 h-24 rounded-lg object-cover border border-white/20 shadow-md hover:opacity-90 transition-opacity"
+                        />
+                      </a>
+                      <AttachmentStatusBadge attachment={att} />
+                    </div>
                   );
                 })}
               </div>
@@ -212,7 +293,19 @@ export function ChatMessage({ message, isLatest, onRetry }: ChatMessageProps) {
                   </div>
                 </div>
               ) : (
-                <MarkdownContent content={message.content} />
+                <>
+                  <AnswerStatusNotice kind={answerKind} />
+                  <MarkdownContent
+                    content={parsedCitations?.body ?? message.content}
+                  />
+                  {showEvidencePanel && (
+                    <EvidencePanel
+                      sources={parsedCitations?.sources ?? []}
+                      basis={parsedCitations?.basis}
+                      compact
+                    />
+                  )}
+                </>
               )}
             </div>
           </div>

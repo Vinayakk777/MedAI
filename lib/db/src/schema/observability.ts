@@ -31,6 +31,10 @@ export const consultationAnalyticsTable = pgTable("consultation_analytics", {
   hadFallback: boolean("had_fallback").default(false),
   errorType: text("error_type"),
   errorMessage: text("error_message"),
+  /** Outcome of the response validation/delivery gate (e.g. validated, fallback, safety_check_failed). */
+  validationOutcome: text("validation_outcome"),
+  /** Retrieval configuration used for this request (e.g. fusion mode, top K, chunks retrieved). */
+  retrievalConfig: jsonb("retrieval_config").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

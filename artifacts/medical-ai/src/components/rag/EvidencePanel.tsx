@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, ExternalLink, Shield, AlertTriangle,
   ChevronDown, ChevronUp, Building2, Calendar, FileText,
 } from "lucide-react";
+import { SourceReferencesPanel } from "./SourceReferencesPanel";
+import type { SourceReference } from "../../lib/citations";
 
 type CitationEvidence = {
   chunkId: string;
@@ -38,6 +41,13 @@ interface Props {
   isLoading?: boolean;
   onClose?: () => void;
   compact?: boolean;
+  /**
+   * Chat mode: verified sources parsed from the response's citation footer.
+   * Passing this (even as an empty array) renders the source list instead of
+   * the RAG debug panel.
+   */
+  sources?: SourceReference[];
+  basis?: string;
 }
 
 const confidenceConfig = {
@@ -46,7 +56,11 @@ const confidenceConfig = {
   low:     { label: "Low Confidence",   color: "text-rose-400",    bg: "bg-rose-500/10",    border: "border-rose-500/20" },
 };
 
-export function EvidencePanel({ query, result, isLoading, onClose, compact }: Props) {
+export function EvidencePanel({ query, result, isLoading, onClose, compact, sources, basis }: Props) {
+  if (sources !== undefined) {
+    return <SourceReferencesPanel sources={sources} basis={basis} compact={compact} />;
+  }
+
   if (isLoading) {
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -154,8 +168,6 @@ function EvidenceGroupCard({ group, compact }: { group: EvidenceGroup; compact?:
     </div>
   );
 }
-
-import { useState } from "react";
 
 function CitationCard({ citation, compact }: { citation: CitationEvidence; compact?: boolean }) {
   const conf = confidenceConfig[citation.confidence] ?? confidenceConfig.moderate;

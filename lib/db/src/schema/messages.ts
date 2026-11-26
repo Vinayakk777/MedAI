@@ -14,6 +14,8 @@ export const messageAttachmentSchema = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
   pageCount: z.number().optional(),
+  /** pending | completed | partial | failed | unsupported (PDFs only). */
+  extractionStatus: z.string().optional(),
 });
 
 export const messagesTable = pgTable("messages", {

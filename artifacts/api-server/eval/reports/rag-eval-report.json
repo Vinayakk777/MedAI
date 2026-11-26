@@ -36,7 +36,7 @@
     "latency": "local fixture timing; not production latency",
     "networkCalls": false
   },
-  "generatedAt": "2026-11-25T12:39:46.984Z",
+  "generatedAt": "2026-11-26T06:00:28.159Z",
   "metrics": {
     "retrieval": {
       "caseCount": 7,
@@ -64,10 +64,10 @@
     },
     "latency": {
       "count": 11,
-      "meanMs": 8.568518181818119,
-      "p50Ms": 7.099599999999555,
-      "p95Ms": 20.83890000000065,
-      "maxMs": 20.83890000000065
+      "meanMs": 8.913699999999897,
+      "p50Ms": 8.735499999999774,
+      "p95Ms": 17.426500000000487,
+      "maxMs": 17.426500000000487
     },
     "routes": {
       "total": 12,
@@ -106,7 +106,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 20.83890000000065,
+      "retrievalLatencyMs": 12.860999999999876,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [
@@ -196,7 +196,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 7.099599999999555,
+      "retrievalLatencyMs": 8.735499999999774,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [
@@ -278,7 +278,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 10.654899999999543,
+      "retrievalLatencyMs": 17.426500000000487,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [
@@ -360,7 +360,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 5.916900000000169,
+      "retrievalLatencyMs": 4.653299999999945,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [
@@ -438,7 +438,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 10.051699999999983,
+      "retrievalLatencyMs": 15.442799999999806,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [
@@ -526,7 +526,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 9.570700000000215,
+      "retrievalLatencyMs": 7.5888999999997395,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [
@@ -607,7 +607,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "no_retrieved_evidence",
-      "retrievalLatencyMs": 0.5820999999996275,
+      "retrievalLatencyMs": 0.4666000000006534,
       "retrieval": {
         "eligible": false,
         "retrievedChunkIds": [],
@@ -716,7 +716,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "unsupported_diagnosis",
-      "retrievalLatencyMs": 4.931699999999182,
+      "retrievalLatencyMs": 5.100400000000263,
       "retrieval": {
         "eligible": false,
         "retrievedChunkIds": [
@@ -788,7 +788,7 @@
       "failureReasons": [],
       "riskLevel": "high_risk",
       "gateReason": "individualized_medication_advice",
-      "retrievalLatencyMs": 12.230100000000675,
+      "retrievalLatencyMs": 9.880799999999908,
       "retrieval": {
         "eligible": false,
         "retrievedChunkIds": [
@@ -872,7 +872,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "citation_validation_failed",
-      "retrievalLatencyMs": 5.775499999999738,
+      "retrievalLatencyMs": 10.910999999999149,
       "retrieval": {
         "eligible": false,
         "retrievedChunkIds": [
@@ -952,7 +952,7 @@
       "failureReasons": [],
       "riskLevel": "low",
       "gateReason": "validated",
-      "retrievalLatencyMs": 6.601599999999962,
+      "retrievalLatencyMs": 4.983899999999267,
       "retrieval": {
         "eligible": true,
         "retrievedChunkIds": [

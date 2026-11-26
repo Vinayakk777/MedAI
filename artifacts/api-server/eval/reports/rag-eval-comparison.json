@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-25T12:39:46.986Z",
+  "generatedAt": "2026-11-26T06:00:28.160Z",
   "dataset": {
     "name": "medai-rag-golden",
     "version": "1.0.0",
@@ -66,10 +66,10 @@
       },
       "latency": {
         "count": 11,
-        "meanMs": 15.168245454545369,
-        "p50Ms": 7.304899999999179,
-        "p95Ms": 105.85030000000006,
-        "maxMs": 105.85030000000006
+        "meanMs": 11.370545454545457,
+        "p50Ms": 3.1109999999998763,
+        "p95Ms": 80.9394000000002,
+        "maxMs": 80.9394000000002
       },
       "routes": {
         "total": 12,
@@ -151,10 +151,10 @@
       },
       "latency": {
         "count": 11,
-        "meanMs": 8.568518181818119,
-        "p50Ms": 7.099599999999555,
-        "p95Ms": 20.83890000000065,
-        "maxMs": 20.83890000000065
+        "meanMs": 8.913699999999897,
+        "p50Ms": 8.735499999999774,
+        "p95Ms": 17.426500000000487,
+        "maxMs": 17.426500000000487
       },
       "routes": {
         "total": 12,
@@ -246,17 +246,17 @@
     {
       "key": "latency-mean",
       "label": "Retrieval latency mean (ms, local fixture)",
-      "baseline": 15.168245454545369,
-      "hybrid": 8.568518181818119,
-      "delta": -6.59972727272725,
+      "baseline": 11.370545454545457,
+      "hybrid": 8.913699999999897,
+      "delta": -2.45684545454556,
       "betterWhen": "neutral"
     },
     {
       "key": "latency-p95",
       "label": "Retrieval latency p95 (ms, local fixture)",
-      "baseline": 105.85030000000006,
-      "hybrid": 20.83890000000065,
-      "delta": -85.01139999999941,
+      "baseline": 80.9394000000002,
+      "hybrid": 17.426500000000487,
+      "delta": -63.51289999999972,
       "betterWhen": "neutral"
     },
     {

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, KeyboardEvent, DragEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, MicOff, Paperclip, X, ImagePlus, FileText, Loader2 } from "lucide-react";
+import { Send, Mic, MicOff, Paperclip, X, ImagePlus, FileText, Loader2, AlertCircle, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSpeechRecognition, type VoiceErrorCode } from "@/hooks/use-speech-recognition";
 import { MAX_ATTACHMENTS } from "@/lib/image";
@@ -22,6 +22,7 @@ interface ChatInputProps {
   isLoading?: boolean;
   isUploading?: boolean;
   uploadProgress?: number | null;
+  uploadError?: string | null;
   placeholder?: string;
   disabled?: boolean;
   attachments?: PendingAttachment[];
@@ -56,6 +57,7 @@ export function ChatInput({
   isLoading = false,
   isUploading = false,
   uploadProgress = null,
+  uploadError = null,
   placeholder = "Describe your symptoms or ask a health question...",
   disabled = false,
   attachments = [],
@@ -144,6 +146,15 @@ export function ChatInput({
 
   return (
     <div className="px-4 pb-4 pt-2">
+      {uploadError && (
+        <div
+          role="alert"
+          className="max-w-3xl mx-auto mb-2 flex items-start gap-2 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] leading-relaxed text-rose-300"
+        >
+          <AlertCircle className="mt-0.5 w-3.5 h-3.5 flex-shrink-0" />
+          <span>{uploadError}</span>
+        </div>
+      )}
       <div className="max-w-3xl mx-auto">
         <motion.div
           animate={{
@@ -193,6 +204,25 @@ export function ChatInput({
                         className="w-16 h-16 rounded-xl object-cover border border-white/10 bg-white/5"
                       />
                     )}
+                    <span
+                      className={`absolute bottom-1 left-1 w-4 h-4 rounded-full flex items-center justify-center shadow ${
+                        isUploading
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-emerald-500 text-white"
+                      }`}
+                      title={isUploading ? "Uploading…" : "Ready"}
+                      aria-label={
+                        isUploading
+                          ? `${att.name}: uploading`
+                          : `${att.name}: ready`
+                      }
+                    >
+                      {isUploading ? (
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      ) : (
+                        <Check className="w-2.5 h-2.5" />
+                      )}
+                    </span>
                     <button
                       type="button"
                       onClick={() => onRemoveAttachment?.(att.localId)}

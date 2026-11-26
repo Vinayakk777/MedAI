@@ -25,6 +25,10 @@ export interface ConsultationTelemetry {
   hadFallback: boolean;
   errorType?: string;
   errorMessage?: string;
+  /** Outcome of the response validation/delivery gate. */
+  validationOutcome?: string;
+  /** Retrieval configuration used for the request. */
+  retrievalConfig?: Record<string, unknown>;
 }
 
 // ─── Feedback ───

@@ -42,6 +42,25 @@ function toClientMsg(m: ServerMessage): Message {
   };
 }
 
+/**
+ * Attachment citations are request-scoped to the message that uploaded them,
+ * so the nearest preceding user message is the only safe URL source.
+ */
+function findPrecedingUserAttachments(
+  messages: Message[],
+  index: number,
+): Attachment[] | undefined {
+  for (let i = index - 1; i >= 0; i--) {
+    const candidate = messages[i];
+    if (candidate.role === "user") {
+      return candidate.attachments && candidate.attachments.length > 0
+        ? candidate.attachments
+        : undefined;
+    }
+  }
+  return undefined;
+}
+
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -166,6 +185,7 @@ export default function ChatPage() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const retryPayloadRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   const failedUserMessageIdRef = useRef<string | null>(null);
 
@@ -341,6 +361,7 @@ export default function ChatPage() {
       if (usePending && pending.length > 0) {
         setIsUploading(true);
         setUploadProgress(0);
+        setUploadError(null);
         try {
           const uploaded: UploadedAttachment[] = await uploadAttachments(
             pending.map((a) => ({
@@ -361,6 +382,7 @@ export default function ChatPage() {
             size: u.size,
             type: u.type ?? (u.kind === "pdf" ? "document" : "image"),
             pageCount: u.pageCount,
+            extractionStatus: u.extractionStatus,
           }));
           pending.forEach((a) => {
             if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
@@ -370,15 +392,19 @@ export default function ChatPage() {
           setIsUploading(false);
           setUploadProgress(null);
           sendingRef.current = false;
+          const message =
+            err instanceof Error ? err.message : "Could not upload the attachment.";
+          setUploadError(message);
           toast({
             title: "Upload failed",
-            description: err instanceof Error ? err.message : "Could not upload the attachment.",
+            description: message,
             variant: "destructive",
           });
           return;
         }
         setIsUploading(false);
         setUploadProgress(null);
+        setUploadError(null);
       }
 
       const tempUserId = `temp-user-${Date.now()}`;
@@ -489,7 +515,22 @@ export default function ChatPage() {
               .map((m) => {
                 if (m.id === tempUserId) {
                   const um = toClientMsg(donePayload!.userMessage);
-                  return { ...m, content: um.content, attachments: um.attachments, timestamp: um.timestamp };
+                  const mergedAttachments = um.attachments?.map((att) => {
+                    const existing = m.attachments?.find(
+                      (previous) => previous.id === att.id,
+                    );
+                    return {
+                      ...att,
+                      extractionStatus:
+                        att.extractionStatus ?? existing?.extractionStatus,
+                    };
+                  });
+                  return {
+                    ...m,
+                    content: um.content,
+                    attachments: mergedAttachments ?? m.attachments,
+                    timestamp: um.timestamp,
+                  };
                 }
                 if (m.id === tempAiId) {
                   const am = toClientMsg(donePayload!.aiMessage);
@@ -552,6 +593,7 @@ export default function ChatPage() {
     setMessages([]);
     setInput("");
     setIsTyping(false);
+    setUploadError(null);
     failedUserMessageIdRef.current = null;
     retryPayloadRef.current = null;
     pendingAttachments.forEach((a) => {
@@ -566,6 +608,7 @@ export default function ChatPage() {
       if (id === activeConvId) return;
       setActiveConvId(id);
       setMessages([]);
+      setUploadError(null);
       failedUserMessageIdRef.current = null;
       retryPayloadRef.current = null;
     },
@@ -695,6 +738,11 @@ export default function ChatPage() {
                     message={msg}
                     isLatest={i === messages.length - 1 && msg.role === "ai"}
                     onRetry={msg.isError ? handleRetry : undefined}
+                    evidenceAttachments={
+                      msg.role === "ai"
+                        ? findPrecedingUserAttachments(messages, i)
+                        : undefined
+                    }
                   />
                 ))}
               </AnimatePresence>
@@ -720,6 +768,7 @@ export default function ChatPage() {
             isLoading={isTyping}
             isUploading={isUploading}
             uploadProgress={uploadProgress}
+            uploadError={uploadError}
             attachments={pendingAttachments}
             onAddFiles={(files) => handleAddFiles(files)}
             onRemoveAttachment={handleRemoveAttachment}

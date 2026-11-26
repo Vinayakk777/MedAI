@@ -192,6 +192,7 @@ function toMessageAttachment(att: ChatAttachment): MessageAttachment {
     width: att.width ?? undefined,
     height: att.height ?? undefined,
     pageCount: att.pageCount ?? undefined,
+    extractionStatus: att.extractionStatus ?? undefined,
   };
 }
 
@@ -348,6 +349,9 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
   const imageAttachments = userAttachments.filter((a) => a.kind !== "pdf");
   const pdfAttachments = userAttachments.filter((a) => a.kind === "pdf");
   const hasImages = imageAttachments.length > 0;
+
+  /** Capture the delivery-gate outcome for observability telemetry. */
+  let deliveryGateReason = "";
 
   try {
     const [conv] = await db
@@ -851,6 +855,7 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
       safetyError,
     });
     const deliveredText = gate.responseText;
+    deliveryGateReason = gate.reason;
     state.finalResponse = deliveredText;
 
     logSafetyOutcome(req, {
@@ -1263,6 +1268,11 @@ router.post("/conversations/:id/messages", requireAuth, async (req, res) => {
             llmModel: hasImages ? config.visionModel : config.chatModel,
             responseLatencyMs: 0,
             safetyInterventions: 0,
+            validationOutcome: deliveryGateReason,
+            retrievalConfig: {
+              chunksRetrieved: ragCitations.length,
+              fusion: "weighted",
+            },
             confidenceScore: state.confidence?.confidenceScore ?? undefined,
             finalRiskCategory: state.healthRiskScore?.riskCategory ?? undefined,
             recommendationCategory: state.careRecommendation?.careRecommendation ?? undefined,

@@ -177,9 +177,12 @@ cd artifacts/api-server && pnpm start
 | `PORT` | ⬜ | API port (default `5000`) |
 | `BASE_PATH` | ⬜ | URL base path (default `/`) |
 | `NODE_ENV` | ⬜ | `development` / `production` |
-| `DEV_AUTH_USER_ID` | ⬜ | **Dev-only** auth bypass (never in production) |
+| `DEV_AUTH_USER_ID` | ⬜ | **Dev-only** auth bypass (never set in production; guarded by `NODE_ENV !== "production"`) |
 | `OPENAI_API_KEY` | ⬜ | Only if using OpenAI embeddings for RAG |
 | `GOOGLE_HEALTH_*` | ⬜ | Optional Google Health Connect OAuth |
+| `CORS_ALLOWED_ORIGINS` | ⬜ | Comma-separated allowed CORS origins (loopback allowed in dev) |
+| `JSON_BODY_LIMIT` | ⬜ | JSON body limit (default `2mb`) |
+| `FORM_BODY_LIMIT` | ⬜ | Form body limit (default `1mb`) |
 
 ---
 
@@ -223,9 +226,17 @@ All `/api/*` routes require Clerk auth (except `/api/healthz`).
 # Typecheck both workspaces
 pnpm run typecheck
 
+# Full unit + integration suite (includes frontend chat-evidence UI tests)
+pnpm run test
+
 # End-to-end API suite (local API running): image upload, streaming, vision, persistence, delete
 node artifacts/api-server/e2e_test.mjs
+
+# Offline RAG golden evaluation (deterministic, no provider key or network)
+pnpm run eval:rag
 ```
+
+`pnpm test` runs the api-server unit/integration suite **plus** the frontend chat-evidence UI tests in `artifacts/medical-ai/test/`. The RAG golden evaluation (`pnpm run eval:rag`) is intentionally separate and is not part of `pnpm test`.
 
 Verified flows: multimodal streaming, image upload/retrieval, text-only streaming, conversation persistence, and the full **Solved / Undo** medical-history flow (regression-tested against the render-crash bug).
 
@@ -238,6 +249,15 @@ Verified flows: multimodal streaming, image upload/retrieval, text-only streamin
 - pino logs redact auth headers/query strings
 - pnpm `minimumReleaseAge` supply-chain protection
 - Secrets stored in env vars — never committed
+
+---
+
+## 🛡 Privacy & Observability
+
+- **Logs:** pino structured logs redact `Authorization` headers, cookies, and query strings. **No user questions, answer text, uploaded document text, patient identifiers, auth tokens, or secrets are logged.**
+- **Analytics:** `consultation_analytics` records pseudonymous identifiers (`userId`, `conversationId`), timings, token counts, retrieval settings, and validation outcome — **no PHI or conversation content**.
+- **Audit:** immutable `audit_logs` and `anonymized_events` tables track operational events with sanitized payloads only.
+- No external observability service is configured by default. Adding one (e.g. Langfuse) must be opt-in and send only sanitized metadata.
 
 ---
 

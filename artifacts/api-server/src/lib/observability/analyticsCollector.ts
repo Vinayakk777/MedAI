@@ -30,6 +30,8 @@ export class AnalyticsCollector {
       hadFallback: data.hadFallback,
       errorType: data.errorType,
       errorMessage: data.errorMessage,
+      validationOutcome: data.validationOutcome,
+      retrievalConfig: data.retrievalConfig ?? {},
     }).returning();
 
     return saved.id;

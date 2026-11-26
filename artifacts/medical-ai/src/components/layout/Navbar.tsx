@@ -4,11 +4,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, Sun, Moon, Activity, LogOut, LayoutDashboard, MessageSquare, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
-import { useUser, useClerk, Show } from "@clerk/react";
+import { useAuth, type AuthUser } from "@/lib/supabase";
 import { ProfileModal } from "@/components/profile/ProfileModal";
 
 function UserAvatar({ size = "md" }: { size?: "sm" | "md" }) {
-  const { user } = useUser();
+  const { user } = useAuth();
   const sz = size === "sm" ? "w-7 h-7 text-xs" : "w-8 h-8 text-sm";
   if (user?.imageUrl) {
     return (
@@ -28,8 +28,7 @@ function UserAvatar({ size = "md" }: { size?: "sm" | "md" }) {
 }
 
 function UserMenu() {
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { user, signOut: supabaseSignOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -100,7 +99,7 @@ function UserMenu() {
             </div>
             <div className="border-t border-white/5 py-1">
               <button
-                onClick={() => signOut({ redirectUrl: "/" })}
+                onClick={async () => { await supabaseSignOut(); setOpen(false); }}
                 data-testid="button-sign-out"
                 className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/8 transition-colors"
               >
@@ -120,6 +119,7 @@ export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const [location] = useLocation();
+  const { user } = useAuth();
 
   const navLinks = [
     { name: "Home", path: "/" },
@@ -178,34 +178,32 @@ export function Navbar() {
                 {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
 
-              <Show when="signed-in">
-                <UserMenu />
-              </Show>
+              {user && <UserMenu />}
 
-              <Show when="signed-out">
-                <Link href="/sign-in">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    Sign In
-                  </Button>
-                </Link>
-                <Link href="/chat">
-                  <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_20px_rgba(0,184,217,0.4)] transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,184,217,0.6)]">
-                    Start Free
-                  </Button>
-                </Link>
-              </Show>
+              {!user && (
+                <>
+                  <Link href="/sign-in">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      Sign In
+                    </Button>
+                  </Link>
+                  <Link href="/chat">
+                    <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_20px_rgba(0,184,217,0.4)] transition-all duration-300 hover:shadow-[0_0_30px_rgba(0,184,217,0.6)]">
+                      Start Free
+                    </Button>
+                  </Link>
+                </>
+              )}
             </div>
           </nav>
 
           {/* Mobile Menu Button */}
-          <div className="md:hidden flex items-center gap-3">
-            <Show when="signed-in">
-              <UserAvatar size="sm" />
-            </Show>
+            <div className="md:hidden flex items-center gap-3">
+              {user && <UserAvatar size="sm" />}
             <button
               onClick={toggleTheme}
               className="p-2 rounded-full hover:bg-secondary text-muted-foreground transition-colors"
@@ -251,16 +249,14 @@ export function Navbar() {
                 ))}
               </ul>
               <div className="pt-2 space-y-2">
-                <Show when="signed-out">
+                {!user && (
                   <Link href="/chat" onClick={() => setIsOpen(false)}>
                     <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_0_20px_rgba(0,184,217,0.4)]">
                       Start Free
                     </Button>
                   </Link>
-                </Show>
-                <Show when="signed-in">
-                  <MobileSignOut />
-                </Show>
+                )}
+                {user && <MobileSignOut />}
               </div>
             </div>
           </motion.div>
@@ -271,10 +267,10 @@ export function Navbar() {
 }
 
 function MobileSignOut() {
-  const { signOut } = useClerk();
+  const { signOut: supabaseSignOut } = useAuth();
   return (
     <button
-      onClick={() => signOut({ redirectUrl: "/" })}
+      onClick={async () => { await supabaseSignOut(); }}
       className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-base font-medium text-rose-400 hover:bg-rose-500/8 transition-colors"
     >
       <LogOut className="w-4 h-4" />

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, PanelLeftClose, PanelLeftOpen, Sparkles, LayoutDashboard, LogOut, UserRound, Sun, Moon, Trash2 } from "lucide-react";
 import { ProfileModal } from "@/components/profile/ProfileModal";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useUser, useClerk } from "@clerk/react";
+import { useAuth, type AuthUser } from "@/lib/supabase";
 import { ChatSidebar, type ServerConversation } from "@/components/chat/ChatSidebar";
 import { ChatMessage, type Message, type Attachment } from "@/components/chat/ChatMessage";
 import { ChatInput, type PendingAttachment } from "@/components/chat/ChatInput";
@@ -74,8 +74,8 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function ChatUserNav() {
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { user } = useAuth();
+  const { signOut: supabaseSignOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -151,7 +151,7 @@ function ChatUserNav() {
             </div>
             <div className="border-t border-white/5 py-1">
               <button
-                onClick={() => signOut({ redirectUrl: basePath || "/" })}
+                onClick={async () => { await supabaseSignOut(); setOpen(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/8 transition-colors"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -271,6 +271,7 @@ export default function ChatPage() {
   const handleAddFiles = useCallback(
     async (files: File[]) => {
       const added: PendingAttachment[] = [];
+      const failures: string[] = [];
       for (const file of files) {
         try {
           const prepared = await prepareAttachment(file);
@@ -287,9 +288,12 @@ export default function ChatPage() {
             height: prepared.height,
           });
         } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Could not read this file.";
+          failures.push(`${file.name}: ${message}`);
           toast({
             title: "Attachment not added",
-            description: err instanceof Error ? err.message : "Could not read this file.",
+            description: message,
             variant: "destructive",
           });
         }
@@ -297,6 +301,9 @@ export default function ChatPage() {
       if (added.length > 0) {
         setPendingAttachments((prev) => [...prev, ...added].slice(0, MAX_ATTACHMENTS));
       }
+      // Keep the failure visible in the composer instead of relying on a
+      // transient toast that disappears before the user can act on it.
+      setUploadError(failures.length > 0 ? failures.join(" ") : null);
     },
     [toast],
   );

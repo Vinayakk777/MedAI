@@ -27,6 +27,22 @@ describe("detectAttachment", () => {
     });
   });
 
+  it("accepts a PDF whose header is preceded by a BOM or binary preamble", () => {
+    const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), pdfHeader]);
+    expect(detectAttachment(withBom, "application/pdf").ok).toBe(true);
+
+    const withPreamble = Buffer.concat([Buffer.alloc(32, 0x20), pdfHeader]);
+    expect(detectAttachment(withPreamble, "application/octet-stream").ok).toBe(true);
+  });
+
+  it("does not treat a PDF header buried deep in the file as a PDF", () => {
+    const buried = Buffer.concat([Buffer.alloc(2048, 0x20), pdfHeader]);
+    expect(detectAttachment(buried, "application/pdf")).toEqual({
+      ok: false,
+      reason: "unsupported_type",
+    });
+  });
+
   it.each([
     ["jpeg", jpegHeader, "image/jpeg", ".jpg"],
     ["png", pngHeader, "image/png", ".png"],

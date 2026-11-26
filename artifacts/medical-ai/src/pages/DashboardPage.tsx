@@ -7,7 +7,7 @@ import {
   Bell, Sun, Moon, Menu, X, MessageSquare, LogOut, Settings, UserRound,
   HeartPulse, Clock, Ambulance, Brain, Target, ShieldCheck,
 } from "lucide-react";
-import { useUser, useClerk } from "@clerk/react";
+import { useAuth, type AuthUser } from "@/lib/supabase";
 import { ProfileModal } from "@/components/profile/ProfileModal";
 import { HealthOverviewCards } from "@/components/dashboard/HealthOverviewCards";
 import { HealthTrendsChart } from "@/components/dashboard/HealthTrendsChart";
@@ -70,8 +70,8 @@ const sectionRefs: Record<string, string> = {
 };
 
 function DashUserNav() {
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { user } = useAuth();
+  const { signOut: supabaseSignOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -147,7 +147,7 @@ function DashUserNav() {
             </div>
             <div className="border-t border-white/5 py-1">
               <button
-                onClick={() => signOut({ redirectUrl: "/" })}
+                onClick={async () => { await supabaseSignOut(); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/8 transition-colors"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -175,7 +175,7 @@ export default function DashboardPage() {
     whatToTellDoctor: string[];
   } | null>(null);
   const { theme, toggleTheme } = useTheme();
-  const { user } = useUser();
+  const { user } = useAuth();
   const mainRef = useRef<HTMLDivElement>(null);
 
   const displayName =

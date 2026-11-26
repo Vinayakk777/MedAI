@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Camera, Save, Loader2 } from "lucide-react";
-import { useUser } from "@clerk/react";
+import { useAuth, type AuthUser, supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 
 function capitalize(s: string) {
@@ -26,7 +26,7 @@ interface ProfileModalProps {
 }
 
 export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
-  const { user } = useUser();
+  const { user } = useAuth();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -58,7 +58,10 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     setUploadingPhoto(true);
     setError(null);
     try {
-      await user.setProfileImage({ file });
+      const { error: err } = await supabase.storage.from("avatars").upload(`avatars/${user.id}`, file, { upsert: true });
+      if (err) throw err;
+      const { data } = supabase.storage.from("avatars").getPublicUrl(`avatars/${user.id}`);
+      await supabase.auth.updateUser({ data: { avatar_url: data.publicUrl } });
     } catch {
       setError("Failed to upload photo. Please try again.");
     } finally {
@@ -72,7 +75,9 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     setSaving(true);
     setError(null);
     try {
-      await user.update({ firstName: firstName.trim(), lastName: lastName.trim() });
+      await supabase.auth.updateUser({
+        data: { first_name: firstName.trim(), last_name: lastName.trim() },
+      });
       setSuccess(true);
       setTimeout(() => {
         setSuccess(false);

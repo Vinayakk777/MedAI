@@ -3,11 +3,6 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import pinoHttp from "pino-http";
-import { clerkMiddleware } from "@clerk/express";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-} from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import {
@@ -47,8 +42,6 @@ app.use(
   }),
 );
 
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
-
 app.use(cors({
   credentials: true,
   origin(origin, callback) {
@@ -62,8 +55,6 @@ app.use(express.urlencoded({
   limit: process.env.FORM_BODY_LIMIT || "1mb",
   parameterLimit: 1000,
 }));
-
-app.use(clerkMiddleware());
 
 app.use("/api", createRateLimiter({ windowMs: 60_000, max: 300 }));
 app.use("/api", router);

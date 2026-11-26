@@ -20,15 +20,15 @@ export type DetectionResult =
 export const MAX_CHAT_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
 export const MAX_CHAT_ATTACHMENTS = 6;
 
+// The PDF specification allows the `%PDF-` header to appear anywhere in the
+// first 1024 bytes. Some scanners and generators prepend a UTF-8 BOM or binary
+// junk, so checking only offset 0 rejects valid documents.
+const PDF_HEADER = Buffer.from("%PDF-", "ascii");
+const PDF_HEADER_SEARCH_BYTES = 1024;
+
 function isPdf(buffer: Buffer): boolean {
-  return (
-    buffer.length >= 5 &&
-    buffer[0] === 0x25 && // %
-    buffer[1] === 0x50 && // P
-    buffer[2] === 0x44 && // D
-    buffer[3] === 0x46 && // F
-    buffer[4] === 0x2d // -
-  );
+  const index = buffer.subarray(0, PDF_HEADER_SEARCH_BYTES).indexOf(PDF_HEADER);
+  return index >= 0;
 }
 
 function isJpeg(buffer: Buffer): boolean {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
-import { useUser } from "@clerk/react";
+import { useAuth } from "@/lib/supabase";
 import {
   FileText, Download, Printer, Copy, AlertTriangle,
   ChevronDown, ChevronUp, Building2, HeartPulse, Stethoscope,
@@ -415,7 +415,7 @@ function buildPrintHtml(report: MedicalReport, patientName: string): string {
 }
 
 export function MedicalReportsViewer() {
-  const { user } = useUser();
+  const { user } = useAuth();
   const patientName =
     user?.fullName ??
     user?.firstName ??

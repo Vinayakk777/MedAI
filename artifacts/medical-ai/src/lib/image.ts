@@ -1,5 +1,5 @@
 export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
-export const ACCEPTED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"] as const;
+export const ACCEPTED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp"] as const;
 export const ACCEPTED_PDF_TYPES = ["application/pdf"] as const;
 export const ACCEPTED_PDF_EXTENSIONS = [".pdf"] as const;
 export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB (matches the server)
@@ -17,27 +17,79 @@ function extensionOf(name: string): string {
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
 }
 
+/** Strip MIME parameters (`image/jpeg; charset=binary`) and normalise case. */
+function normalizeMime(type: string | undefined): string {
+  return (type || "").split(";")[0].trim().toLowerCase();
+}
+
+const PDF_HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
+const PDF_HEADER_SEARCH_BYTES = 1024;
+
+function matchesAt(bytes: Uint8Array, offset: number, expected: number[] | string): boolean {
+  if (bytes.length < offset + expected.length) return false;
+  for (let i = 0; i < expected.length; i++) {
+    const value = typeof expected === "string" ? expected.charCodeAt(i) : expected[i];
+    if (bytes[offset + i] !== value) return false;
+  }
+  return true;
+}
+
+function containsBytes(bytes: Uint8Array, needle: number[], limit: number): boolean {
+  const last = Math.min(bytes.length - needle.length, limit - needle.length);
+  for (let i = 0; i <= last; i++) {
+    if (matchesAt(bytes, i, needle)) return true;
+  }
+  return false;
+}
+
 /**
- * Classifies a candidate attachment. The declared MIME type and the extension
- * must agree; the server independently re-checks the file signature.
+ * Reads the leading bytes of a file and identifies it by signature.
+ *
+ * Browsers do not always report a useful `File.type` (drag-and-drop, Android
+ * document providers, Windows shell copies) and some sources omit the file
+ * extension entirely. Signatures are the same gate the server uses, so this is
+ * the most reliable way to decide whether a selection can be uploaded.
+ */
+export async function sniffAttachmentKind(file: Blob): Promise<AttachmentKind | null> {
+  try {
+    const head = new Uint8Array(await file.slice(0, PDF_HEADER_SEARCH_BYTES).arrayBuffer());
+
+    if (containsBytes(head, PDF_HEADER, PDF_HEADER_SEARCH_BYTES)) return "pdf";
+    if (matchesAt(head, 0, [0xff, 0xd8, 0xff])) return "image";
+    if (matchesAt(head, 0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+      return "image";
+    }
+    if (matchesAt(head, 0, "RIFF") && matchesAt(head, 8, "WEBP")) return "image";
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Classifies a candidate attachment from its name/type. This is intentionally
+ * tolerant of missing or generic MIME types because the server re-checks the
+ * file signature; `sniffAttachmentKind` is preferred when the bytes are
+ * available.
  */
 export function detectAttachmentKind(file: File): AttachmentKind | null {
   const ext = extensionOf(file.name);
-  const declared = (file.type || "").toLowerCase();
+  const declared = normalizeMime(file.type);
 
-  if (
-    ACCEPTED_PDF_EXTENSIONS.includes(ext as (typeof ACCEPTED_PDF_EXTENSIONS)[number]) &&
-    (declared === "application/pdf" || declared === "" || declared === "application/octet-stream")
-  ) {
+  // A recognised extension wins: it is what the user sees and what the OS
+  // reports most consistently.
+  if (ACCEPTED_PDF_EXTENSIONS.includes(ext as (typeof ACCEPTED_PDF_EXTENSIONS)[number])) {
     return "pdf";
   }
-
-  if (
-    ACCEPTED_IMAGE_TYPES.includes(declared as (typeof ACCEPTED_IMAGE_TYPES)[number]) &&
-    ACCEPTED_IMAGE_EXTENSIONS.includes(ext as (typeof ACCEPTED_IMAGE_EXTENSIONS)[number])
-  ) {
+  if (ACCEPTED_IMAGE_EXTENSIONS.includes(ext as (typeof ACCEPTED_IMAGE_EXTENSIONS)[number])) {
     return "image";
   }
+
+  // Fall back to the declared MIME for extensionless files. The server still
+  // verifies the signature before accepting anything.
+  if (declared === "application/pdf") return "pdf";
+  if (declared.startsWith("image/")) return "image";
 
   return null;
 }
@@ -118,14 +170,7 @@ async function drawScaled(
   return { blob, width, height };
 }
 
-/**
- * Validates and compresses an image for upload while keeping enough detail
- * for useful medical analysis. Already-small images are passed through as-is.
- */
-export async function prepareImage(file: File): Promise<CompressedImage> {
-  const validation = validateImage(file);
-  if (!validation.ok) throw new Error(validation.reason);
-
+async function compressImage(file: File): Promise<CompressedImage> {
   const img = await loadImage(file);
 
   // Pass through small images unchanged to preserve fidelity.
@@ -136,7 +181,9 @@ export async function prepareImage(file: File): Promise<CompressedImage> {
   ) {
     return {
       blob: file,
-      mimeType: file.type,
+      // Keep the browser's value (possibly empty); the server detects the
+      // actual format from the file signature.
+      mimeType: normalizeMime(file.type),
       name: file.name,
       width: img.naturalWidth,
       height: img.naturalHeight,
@@ -162,16 +209,33 @@ export async function prepareImage(file: File): Promise<CompressedImage> {
   }
   if (!result) result = await drawScaled(img, 640, 0.55);
 
-  const ext = file.name.slice(file.name.lastIndexOf("."));
+  // The compressed payload is always JPEG, so the file name must not keep a
+  // `.png`/`.webp` extension that no longer matches the bytes.
   const base = file.name.replace(/\.[^/.]+$/, "") || "image";
 
   return {
     blob: result.blob,
     mimeType: "image/jpeg",
-    name: `${base}${ext}`,
+    name: `${base}.jpg`,
     width: result.width,
     height: result.height,
   };
+}
+
+/**
+ * Validates and compresses an image for upload while keeping enough detail
+ * for useful medical analysis. Already-small images are passed through as-is.
+ */
+export async function prepareImage(file: File): Promise<CompressedImage> {
+  const validation = validateImage(file);
+  if (!validation.ok) throw new Error(validation.reason);
+  return compressImage(file);
+}
+
+/** Replace any existing extension so the name matches the uploaded bytes. */
+function withExtension(name: string, extension: string): string {
+  const base = name.replace(/\.[^/.]+$/, "").trim() || "attachment";
+  return `${base}${extension}`;
 }
 
 export type PreparedAttachment = {
@@ -186,21 +250,33 @@ export type PreparedAttachment = {
 /**
  * Validates a chat attachment and prepares it for upload. Images are
  * compressed; PDFs are sent unchanged so the server can extract their text.
+ *
+ * The file signature is checked first. Extension/MIME metadata is only a
+ * fallback, because browsers frequently report an empty `File.type` (or omit
+ * the extension) for files picked from the OS, Android document providers, or
+ * drag-and-drop.
  */
 export async function prepareAttachment(file: File): Promise<PreparedAttachment> {
-  const validation = validateAttachment(file);
-  if (!validation.ok) throw new Error(validation.reason);
+  if (file.size === 0) throw new Error("This file is empty.");
+  if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+    throw new Error("This file is too large (max 25 MB). Please choose a smaller file.");
+  }
 
-  if (validation.kind === "pdf") {
+  const kind = (await sniffAttachmentKind(file)) ?? detectAttachmentKind(file);
+  if (!kind) {
+    throw new Error("Unsupported file type. Please upload a PDF, JPG, PNG, or WebP file.");
+  }
+
+  if (kind === "pdf") {
     return {
       blob: file,
       mimeType: "application/pdf",
-      name: file.name,
+      name: withExtension(file.name, ".pdf"),
       kind: "pdf",
     };
   }
 
-  const prepared = await prepareImage(file);
+  const prepared = await compressImage(file);
   return { ...prepared, kind: "image" };
 }
 
@@ -218,6 +294,22 @@ export type UploadedAttachment = {
   extractionStatus?: string;
 };
 
+function uploadFailureMessage(status: number): string {
+  if (status === 401 || status === 403) {
+    return "Your session expired before the file finished uploading. Sign in again and retry.";
+  }
+  if (status === 413) {
+    return "This file is too large for the server (max 25 MB). Please choose a smaller file.";
+  }
+  if (status === 429) {
+    return "Too many uploads right now. Wait a moment and try again.";
+  }
+  if (status >= 500) {
+    return "The server could not store this file. Please try again in a moment.";
+  }
+  return `Attachment upload failed (HTTP ${status}). Please try again.`;
+}
+
 /** Uploads images/PDFs to the authenticated backend endpoint with progress. */
 export function uploadAttachments(
   attachments: { blob: Blob; name: string; mimeType: string }[],
@@ -227,11 +319,21 @@ export function uploadAttachments(
   return new Promise((resolve, reject) => {
     const form = new FormData();
     for (const attachment of attachments) {
-      form.append("images", attachment.blob, attachment.name);
+      // Ensure the multipart part carries a usable content type even when the
+      // browser reported none (the server still verifies the signature).
+      const declared = (attachment.blob.type || "").split(";")[0].trim().toLowerCase();
+      const payload =
+        attachment.mimeType && declared !== attachment.mimeType
+          ? new Blob([attachment.blob], { type: attachment.mimeType })
+          : attachment.blob;
+      form.append("images", payload, attachment.name);
     }
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/images/upload");
+    // Same-origin cookies are sent by default, but this also keeps the request
+    // authenticated when the app is hosted on a sibling origin.
+    xhr.withCredentials = true;
 
     if (signal) {
       if (signal.aborted) {
@@ -265,7 +367,7 @@ export function uploadAttachments(
         onProgress?.(100);
         resolve(json.attachments as UploadedAttachment[]);
       } else {
-        reject(new Error(json?.error ?? "Attachment upload failed. Please try again."));
+        reject(new Error(json?.error ?? uploadFailureMessage(xhr.status)));
       }
     };
     xhr.onerror = () => reject(new Error("Network error while uploading the attachment."));

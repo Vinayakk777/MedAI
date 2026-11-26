@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { VoiceEngine } from "./lib/voice/voiceEngine";
-import { getAuth } from "@clerk/express";
+import { supabaseAdmin } from "./lib/supabase/server";
 import type { ClientMessage, ServerMessage } from "./lib/voice/types";
 
 const rawPort = process.env["PORT"];
@@ -22,12 +22,18 @@ wss.on("connection", (ws: WebSocket, req) => {
   let userId: string | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-  try {
-    const auth = getAuth(req as any);
-    userId = auth?.userId || null;
-  } catch {
-    // Will handle via start_session message
-  }
+  (async () => {
+    try {
+      const authHeader = (req as any).headers?.authorization;
+      const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      if (token) {
+        const { data } = await supabaseAdmin.auth.getUser(token);
+        userId = data?.user?.id ?? null;
+      }
+    } catch {
+      // Will handle via start_session message
+    }
+  })();
 
   const send = (msg: ServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) {

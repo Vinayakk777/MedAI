@@ -1,7 +1,7 @@
-import { getAuth } from "@clerk/express";
 import type { Request, Response, NextFunction } from "express";
 import { db, clinicianProfilesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
+import { verifySupabaseToken } from "../lib/supabase/server";
 
 export interface AdminRequest extends Request {
   userId: string;
@@ -47,8 +47,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     return;
   }
 
-  const auth = getAuth(req);
-  const userId = (auth?.sessionClaims?.userId as string | undefined) || auth?.userId || undefined;
+  const userId = await verifySupabaseToken(req.headers.authorization);
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;

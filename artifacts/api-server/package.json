@@ -17,6 +17,7 @@
     "@langchain/openai": "^1.8.5",
     "@langchain/textsplitters": "^1.0.2",
     "@napi-rs/canvas": "^1.2.0",
+    "@supabase/supabase-js": "^2.119.2",
     "@swc/helpers": "^0.5.23",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
